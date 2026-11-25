@@ -1,0 +1,60 @@
+# Search criteria. Edit this file to change what the scrapers collect.
+operation: rent          # long-term rental only
+max_price_eur: 1000
+min_bedrooms: 2
+property_types: [flat, house]   # flat = piso/ático/dúplex/estudio, house = chalet/adosado/pareado/casa
+
+areas:
+  almeria_city:
+    label: Almería ciudad
+    municipalities: [Almería]   # includes Centro, Zapillo, Nueva Andalucía, Ciudad Jardín, El Toyo, Retamar
+  west_coast:
+    label: Poniente
+    municipalities: [Roquetas de Mar, El Ejido]   # Aguadulce (Roquetas), Almerimar (El Ejido)
+    neighbourhoods: [Aguadulce, Almerimar]
+  east_coast:
+    label: Levante / Cabo de Gata
+    municipalities: [Níjar, Carboneras, Mojácar, Vera]
+
+# Must-haves (confirmed): a flat needs a lift OR A/C; a house needs A/C.
+must_have:
+  rule: elevator_or_ac   # options: elevator_and_ac | elevator_or_ac | ac_plus_elevator_if_above_1st
+
+# Listings whose title/description contain any of these are dropped.
+# Matching ignores case, accents and repeated spaces.
+short_term_blocklist:
+  - temporada
+  - vacacional
+  - por meses
+  - a junio              # "septiembre a junio", "noviembre a junio"...
+  - hasta junio
+  - curso escolar
+  - final de curso
+  - verano
+  - alquiler temporal
+
+# Room shares, not whole flats.
+room_share_blocklist:
+  - compartir habitacion
+  - compartir piso
+  - piso compartido
+  - piso a compartir
+  - companero de piso
+  - companera de piso
+  - companero/a
+  - cada habitacion
+  - se alquilan habitaciones
+  - alquilo habitacion
+  - alquiler de habitacion
+  - solo chicas
+  - solo chicos
+
+ranking:
+  - furnished_first
+  - shortest_commute
+
+commute:
+  address: null          # set via the COMMUTE_ADDRESS env var / GitHub secret (kept out of the public repo)
+  mode: driving-car
+
+stale_after_days: 3      # mark a listing "gone" after this many days unseen
