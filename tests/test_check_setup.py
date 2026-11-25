@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import imaplib
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -171,8 +172,13 @@ def test_local(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_main_reports_and_exit_code(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
+    env_file = tmp_path / ".env"
+    monkeypatch.setattr(cs, "ENV_FILE", env_file)
+    assert cs.main([]) == 1
+    assert ".env not found" in capsys.readouterr().out
+    env_file.write_text("", encoding="utf-8")
     monkeypatch.setattr(cs, "load_env_file", lambda path: None)
     monkeypatch.setattr(cs, "check_supabase", lambda client: [cs.Check("Supabase URL", False)])
     monkeypatch.setattr(cs, "check_telegram", lambda client, t: [])
