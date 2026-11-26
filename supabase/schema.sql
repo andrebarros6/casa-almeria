@@ -67,20 +67,29 @@ create table if not exists reactions (
   primary key (group_id, user_email)
 );
 
+-- What the page shows at the top: search criteria + discard counts from the latest run.
+create table if not exists search_summary (
+  id text primary key,          -- always 'latest'
+  criteria jsonb not null,
+  counts jsonb not null,
+  updated_at timestamptz not null
+);
+
 -- API access. Newer Supabase projects don't grant table access to API roles automatically.
 -- anon (not logged in) gets nothing. authenticated users are further limited by RLS below.
 grant usage on schema public to service_role, authenticated;
-grant all on listings, source_runs, reactions, allowed_users to service_role;
+grant all on listings, source_runs, reactions, allowed_users, search_summary to service_role;
 grant usage, select on all sequences in schema public to service_role;
-grant select on listings, source_runs, allowed_users to authenticated;
+grant select on listings, source_runs, allowed_users, search_summary to authenticated;
 grant select, insert, update, delete on reactions to authenticated;
-revoke all on listings, source_runs, reactions, allowed_users from anon;
+revoke all on listings, source_runs, reactions, allowed_users, search_summary from anon;
 
 -- Row-level security
 alter table allowed_users enable row level security;
 alter table listings enable row level security;
 alter table source_runs enable row level security;
 alter table reactions enable row level security;
+alter table search_summary enable row level security;
 
 create or replace function is_allowed() returns boolean
 language sql stable security definer set search_path = public as $$
@@ -95,6 +104,9 @@ create policy "allowed read listings" on listings for select to authenticated us
 
 drop policy if exists "allowed read runs" on source_runs;
 create policy "allowed read runs" on source_runs for select to authenticated using (is_allowed());
+
+drop policy if exists "allowed read summary" on search_summary;
+create policy "allowed read summary" on search_summary for select to authenticated using (is_allowed());
 
 drop policy if exists "allowed read reactions" on reactions;
 create policy "allowed read reactions" on reactions for select to authenticated using (is_allowed());

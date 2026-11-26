@@ -172,3 +172,98 @@ def test_supabase_auth_headers_by_key_type(key: str, bearer: bool) -> None:
     store = SupabaseStore("https://db.test", key)
     assert store.headers["apikey"] == key
     assert ("Authorization" in store.headers) is bearer
+
+
+def test_json_store_summary_reasons_and_noop_moves(tmp_path: Path) -> None:
+    store = JsonStore(tmp_path / "l.json")
+    store.upsert(
+        [
+            make_listing(source_id="1"),
+            make_listing(source_id="2", rejected_reason="price 1100 > 1000"),
+            make_listing(source_id="3", rejected_reason="price 1200 > 1000", gone=True),
+        ]
+    )
+    assert sorted(store.current_reasons(), key=str) == [None, "price 1100 > 1000"]
+    store.save_summary({"counts": {"seen": 2}})
+    store.move_reactions({"a": "b"})
+    assert JsonStore(tmp_path / "l.json").listings  # reloads with a summary present
+
+
+def test_merge_notes() -> None:
+    from scraper.store import merge_notes
+
+    assert merge_notes("gosto", "varanda") == "gosto / varanda"
+    assert merge_notes("gosto", "gosto") == "gosto"
+    assert merge_notes(None, " ") is None
+    assert merge_notes(None, "x") == "x"
+
+
+def _client(handler: object) -> httpx.Client:
+    return httpx.Client(transport=httpx.MockTransport(handler))  # type: ignore[arg-type]
+
+
+def test_supabase_pages_past_the_row_limit() -> None:
+    row = {**make_listing().model_dump(mode="json"), "id": "pisos:1", "features": []}
+    offsets: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        offsets.append(request.url.params["offset"])
+        full = int(request.url.params["offset"]) < 4
+        return httpx.Response(200, json=[row] * (2 if full else 1))
+
+    store = SupabaseStore("https://db.test", "k", client=_client(handler))
+    store.PAGE = 2
+    assert len(store.active_listings()) == 5
+    assert offsets == ["0", "2", "4"]
+
+
+def test_supabase_reasons_and_summary() -> None:
+    sent: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        if request.method == "GET":
+            rows = [{"id": "x", "rejected_reason": "price"}, {"id": "y", "rejected_reason": None}]
+            return httpx.Response(200, json=rows)
+        return httpx.Response(201)
+
+    store = SupabaseStore("https://db.test", "k", client=_client(handler))
+    assert store.current_reasons() == ["price", None]
+    store.save_summary({"criteria": {}, "counts": {}, "updated_at": "t"})
+    assert sent[-1].url.path.endswith("/search_summary")
+    assert json.loads(sent[-1].content)["id"] == "latest"
+    assert "merge-duplicates" in sent[-1].headers["Prefer"]
+
+
+def test_supabase_moves_reactions_to_the_surviving_card() -> None:
+    rows = {
+        ("old", "a@x"): {"group_id": "old", "user_email": "a@x", "reaction": "like", "note": "bom"},
+        ("old", "b@x"): {"group_id": "old", "user_email": "b@x", "reaction": None, "note": "caro"},
+        ("new", "b@x"): {
+            "group_id": "new",
+            "user_email": "b@x",
+            "reaction": "reject",
+            "note": None,
+        },
+    }
+    writes: list[tuple[str, dict[str, str], object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        if request.method == "GET":
+            group = params["group_id"].removeprefix("eq.")
+            user = params.get("user_email", "").removeprefix("eq.")
+            found = [r for (g, u), r in rows.items() if g == group and (not user or u == user)]
+            return httpx.Response(200, json=found)
+        body = json.loads(request.content) if request.content else None
+        writes.append((request.method, params, body))
+        return httpx.Response(204)
+
+    SupabaseStore("https://db.test", "k", client=_client(handler)).move_reactions({"old": "new"})
+    a_key = {"group_id": "eq.old", "user_email": "eq.a@x"}
+    b_new = {"group_id": "eq.new", "user_email": "eq.b@x"}
+    b_old = {"group_id": "eq.old", "user_email": "eq.b@x"}
+    # a@x had nothing on the survivor: re-keyed. b@x had a reaction there: merged + old deleted.
+    assert ("PATCH", a_key, {"group_id": "new"}) in writes
+    assert ("PATCH", b_new, {"reaction": "reject", "note": "caro"}) in writes
+    assert ("DELETE", b_old, None) in writes

@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scraper.config import load_spec
@@ -14,6 +15,7 @@ from scraper.notify import Telegram, notify
 from scraper.pipeline import RunOutcome, run_source
 from scraper.sources import select
 from scraper.store import JsonStore, Store, SupabaseStore
+from scraper.summary import build_summary
 
 DRY_RUN_FILE = Path("out/listings.json")
 ENV_FILE = Path(".env")
@@ -70,10 +72,12 @@ def main(argv: list[str] | None = None) -> int:
             + (f" error={r.error}" if r.error else "")
         )
 
-    merged = regroup(store.active_listings())
-    if merged:
-        store.upsert(merged)
-    print(f"regroup      merged={len(merged)}")
+    regrouping = regroup(store.active_listings())
+    if regrouping.changed:
+        store.upsert(regrouping.changed)
+        store.move_reactions(regrouping.moves)
+    print(f"regroup      merged={len(regrouping.moves)} cards")
+    store.save_summary(build_summary(spec, store.current_reasons(), datetime.now(UTC)))
 
     should_notify = args.notify if args.notify is not None else not args.dry_run
     if should_notify:

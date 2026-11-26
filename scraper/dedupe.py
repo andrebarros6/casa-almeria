@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import math
+import re
+import unicodedata
 from collections.abc import Iterable
+from dataclasses import dataclass, field
+from datetime import datetime
 
 from scraper.models import Listing
 
 PRICE_TOLERANCE = 0.03
 AREA_TOLERANCE = 0.05
 MAX_DISTANCE_M = 150.0
+# Portals geocode the same flat up to km apart, so near-identical text also counts.
+# 0.9, not lower: agencies reuse ~65%-identical templates for *different* flats.
+DESCRIPTION_SIMILARITY = 0.9
+MIN_DESCRIPTION_WORDS = 15
 
 
 def haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -26,6 +34,26 @@ def _close(a: int | None, b: int | None, tol: float) -> bool:
     return abs(a - b) <= tol * max(a, b)
 
 
+def _words(text: str) -> set[str]:
+    folded = unicodedata.normalize("NFKD", text.lower())
+    folded = "".join(c for c in folded if not unicodedata.combining(c))
+    return set(re.sub(r"\W+", " ", folded).split())
+
+
+def description_similarity(a: Listing, b: Listing) -> float:
+    """Word-set overlap (Jaccard); 0 when either description is too short to judge."""
+    wa, wb = _words(a.description), _words(b.description)
+    if len(wa) < MIN_DESCRIPTION_WORDS or len(wb) < MIN_DESCRIPTION_WORDS:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
+def _near(a: Listing, b: Listing) -> bool:
+    if a.lat is None or a.lng is None or b.lat is None or b.lng is None:
+        return False
+    return haversine_m(a.lat, a.lng, b.lat, b.lng) <= MAX_DISTANCE_M
+
+
 def is_duplicate(a: Listing, b: Listing) -> bool:
     if a.id == b.id:
         return False
@@ -35,10 +63,7 @@ def is_duplicate(a: Listing, b: Listing) -> bool:
         return False
     if not _close(a.area_m2, b.area_m2, AREA_TOLERANCE):
         return False
-    if None in (a.lat, a.lng, b.lat, b.lng):
-        return False
-    assert a.lat is not None and a.lng is not None and b.lat is not None and b.lng is not None
-    return haversine_m(a.lat, a.lng, b.lat, b.lng) <= MAX_DISTANCE_M
+    return _near(a, b) or description_similarity(a, b) >= DESCRIPTION_SIMILARITY
 
 
 def assign_group(listing: Listing, candidates: Iterable[Listing]) -> str:
@@ -49,29 +74,59 @@ def assign_group(listing: Listing, candidates: Iterable[Listing]) -> str:
     return listing.id
 
 
-def regroup(active: list[Listing]) -> list[Listing]:
-    """Merge listings that sit alone on a card into an older card for the same flat.
+@dataclass
+class Regrouping:
+    changed: list[Listing] = field(default_factory=list)  # listings whose group_id moved
+    moves: dict[str, str] = field(default_factory=dict)  # absorbed group id -> surviving id
 
-    Catches duplicates missed when two sources ran at the same time. Older groups keep
-    their id (so shared reactions stay attached); only singletons move. Returns the
-    listings whose group_id changed.
+
+def regroup(active: list[Listing]) -> Regrouping:
+    """Merge cards (groups) that are the same flat.
+
+    Catches duplicates missed when sources ran at the same time or when two multi-listing
+    cards match each other. The surviving card is the oldest one, so its id (and the
+    reactions keyed on it) is stable; `moves` tells the caller which reactions to move.
     """
-    sizes: dict[str, int] = {}
+    gid = {item.id: item.group_id or item.id for item in active}
+    parent: dict[str, str] = {g: g for g in gid.values()}
+
+    def find(g: str) -> str:
+        while parent[g] != g:
+            parent[g] = parent[parent[g]]
+            g = parent[g]
+        return g
+
+    for i, a in enumerate(active):
+        for b in active[i + 1 :]:
+            ga, gb = find(gid[a.id]), find(gid[b.id])
+            if ga != gb and is_duplicate(a, b):
+                parent[ga] = gb
+
+    # Survivor per merged set: the group first seen earliest (ties: smallest id).
+    oldest: dict[str, tuple[bool, datetime | None, str]] = {}
     for item in active:
-        key = item.group_id or item.id
-        sizes[key] = sizes.get(key, 0) + 1
-    ordered = sorted(active, key=lambda x: (x.first_seen is None, x.first_seen or 0, x.id))
-    changed: list[Listing] = []
-    for i, item in enumerate(ordered):
-        own = item.group_id or item.id
-        if sizes[own] != 1:
-            continue
-        for older in ordered[:i]:
-            if is_duplicate(item, older):
-                target = older.group_id or older.id
-                item.group_id = target
-                sizes[own] -= 1
-                sizes[target] += 1
-                changed.append(item)
-                break
-    return changed
+        g = gid[item.id]
+        key = (item.first_seen is None, item.first_seen, g)
+        root = find(g)
+        current = oldest.get(root)
+        if current is None or _before(key, current):
+            oldest[root] = key
+    survivor = {root: key[2] for root, key in oldest.items()}
+
+    result = Regrouping()
+    for item in active:
+        old = gid[item.id]
+        new = survivor[find(old)]
+        if new != old:
+            result.moves[old] = new
+            item.group_id = new
+            result.changed.append(item)
+    return result
+
+
+def _before(a: tuple[bool, datetime | None, str], b: tuple[bool, datetime | None, str]) -> bool:
+    if a[0] != b[0]:
+        return not a[0]  # known first_seen beats unknown
+    if a[1] is not None and b[1] is not None and a[1] != b[1]:
+        return a[1] < b[1]
+    return a[2] < b[2]

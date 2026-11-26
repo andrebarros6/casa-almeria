@@ -37,6 +37,16 @@ class Store(Protocol):
     def mark_gone(self, source: str, last_seen_before: datetime) -> int: ...
     def record_run(self, run: SourceRun) -> None: ...
     def recent_runs(self, source: str, limit: int) -> list[SourceRun]: ...
+    def current_reasons(self) -> list[str | None]: ...
+    def save_summary(self, summary: dict[str, Any]) -> None: ...
+    def move_reactions(self, moves: dict[str, str]) -> None: ...
+
+
+def merge_notes(a: str | None, b: str | None) -> str | None:
+    """Combine two notes when two cards merge; keep each once."""
+    parts = [n.strip() for n in (a, b) if n and n.strip()]
+    unique = list(dict.fromkeys(parts))
+    return " / ".join(unique) or None
 
 
 def _row(listing: Listing) -> dict[str, Any]:
@@ -53,6 +63,7 @@ class JsonStore:
         self.path = path
         self.listings: dict[str, Listing] = {}
         self.runs: list[SourceRun] = []
+        self.summary: dict[str, Any] | None = None
         if path and path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
             for row in data.get("listings", []):
@@ -93,6 +104,16 @@ class JsonStore:
         runs = sorted((r for r in self.runs if r.source == source), key=lambda r: r.started_at)
         return list(reversed(runs))[:limit]
 
+    def current_reasons(self) -> list[str | None]:
+        return [item.rejected_reason for item in self.listings.values() if not item.gone]
+
+    def save_summary(self, summary: dict[str, Any]) -> None:
+        self.summary = summary
+        self._save()
+
+    def move_reactions(self, moves: dict[str, str]) -> None:
+        """Dry runs have no reactions."""
+
     def _save(self) -> None:
         if not self.path:
             return
@@ -100,6 +121,7 @@ class JsonStore:
         data = {
             "listings": [_row(item) for item in self.listings.values()],
             "runs": [r.model_dump(mode="json") for r in self.runs],
+            "summary": self.summary,
         }
         self.path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
 
@@ -108,6 +130,7 @@ class SupabaseStore:
     """Talks to Supabase's REST API (PostgREST) with the service-role key."""
 
     CHUNK = 100
+    PAGE = 1000  # PostgREST returns at most 1000 rows per request by default
 
     def __init__(self, url: str, service_key: str, client: httpx.Client | None = None) -> None:
         self.client = client or httpx.Client(timeout=30)
@@ -155,11 +178,22 @@ class SupabaseStore:
                 out[listing.id] = listing
         return out
 
+    def _get_all(self, path: str, params: dict[str, str]) -> list[dict[str, Any]]:
+        """GET every row, page by page (a single GET silently stops at 1000 rows)."""
+        rows: list[dict[str, Any]] = []
+        while True:
+            page = self._request(
+                "GET",
+                path,
+                params={**params, "order": "id", "limit": str(self.PAGE), "offset": str(len(rows))},
+            )
+            rows.extend(page)
+            if len(page) < self.PAGE:
+                return rows
+
     def active_listings(self) -> list[Listing]:
-        rows = self._request(
-            "GET",
-            "listings",
-            params={"gone": "eq.false", "rejected_reason": "is.null", "select": "*"},
+        rows = self._get_all(
+            "listings", {"gone": "eq.false", "rejected_reason": "is.null", "select": "*"}
         )
         return [Listing.model_validate(r) for r in rows]
 
@@ -205,3 +239,54 @@ class SupabaseStore:
             },
         )
         return [SourceRun.model_validate(r) for r in rows]
+
+    def current_reasons(self) -> list[str | None]:
+        rows = self._get_all("listings", {"gone": "eq.false", "select": "id,rejected_reason"})
+        return [r["rejected_reason"] for r in rows]
+
+    def save_summary(self, summary: dict[str, Any]) -> None:
+        self._request(
+            "POST",
+            "search_summary",
+            body={"id": "latest", **summary},
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+
+    def move_reactions(self, moves: dict[str, str]) -> None:
+        """Re-key ❤️/❌/notes from absorbed cards onto the surviving card."""
+        for old, new in moves.items():
+            for row in self._request(
+                "GET", "reactions", params={"group_id": f"eq.{old}", "select": "*"}
+            ):
+                user = row["user_email"]
+                existing = self._request(
+                    "GET",
+                    "reactions",
+                    params={"group_id": f"eq.{new}", "user_email": f"eq.{user}", "select": "*"},
+                )
+                if existing:
+                    keep = existing[0]
+                    self._request(
+                        "PATCH",
+                        "reactions",
+                        params={"group_id": f"eq.{new}", "user_email": f"eq.{user}"},
+                        body={
+                            "reaction": keep["reaction"] or row["reaction"],
+                            "note": merge_notes(keep["note"], row["note"]),
+                        },
+                        prefer="return=minimal",
+                    )
+                    self._request(
+                        "DELETE",
+                        "reactions",
+                        params={"group_id": f"eq.{old}", "user_email": f"eq.{user}"},
+                        prefer="return=minimal",
+                    )
+                else:
+                    self._request(
+                        "PATCH",
+                        "reactions",
+                        params={"group_id": f"eq.{old}", "user_email": f"eq.{user}"},
+                        body={"group_id": new},
+                        prefer="return=minimal",
+                    )

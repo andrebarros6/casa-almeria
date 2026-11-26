@@ -184,20 +184,72 @@ def test_commute_address_comes_from_env(monkeypatch: pytest.MonkeyPatch) -> None
     assert load_spec().commute.address == "Somewhere 1, Almería"
 
 
-def test_regroup_merges_singletons_into_older_groups() -> None:
+def test_regroup_merges_whole_cards_into_the_oldest() -> None:
     from datetime import UTC, datetime, timedelta
 
     from scraper.dedupe import regroup
 
     t0 = datetime(2026, 11, 25, tzinfo=UTC)
-    old_a = make_listing(source="pisos", source_id="1", group_id="pisos:1", first_seen=t0)
-    old_b = make_listing(source="enalquiler", source_id="2", group_id="pisos:1", first_seen=t0)
-    lonely = make_listing(
-        source="fotocasa", source_id="3", group_id="fotocasa:3", first_seen=t0 + timedelta(hours=1)
+    text = " ".join(f"palabra{i}" for i in range(30))
+    old_a = make_listing(
+        source="pisos", source_id="1", group_id="pisos:1", first_seen=t0, description=text
     )
-    other = make_listing(source="fotocasa", source_id="4", group_id=None, lat=37.5, first_seen=None)
-    changed = regroup([lonely, old_b, old_a, other])
-    assert [x.id for x in changed] == ["fotocasa:3"]
-    assert lonely.group_id == "pisos:1"
-    assert old_a.group_id == old_b.group_id == "pisos:1"  # older group keeps its id
-    assert regroup([lonely, old_b, old_a, other]) == []  # idempotent
+    old_b = make_listing(
+        source="enalquiler", source_id="2", group_id="pisos:1", first_seen=t0, description=text
+    )
+    # A second multi-listing card for the same flat: pins ~1 km away, same text.
+    newer_a = make_listing(
+        source="fotocasa",
+        source_id="3",
+        group_id="fotocasa:3",
+        first_seen=t0 + timedelta(hours=1),
+        lat=36.85,
+        description=text,
+    )
+    newer_b = make_listing(
+        source="pisos",
+        source_id="4",
+        group_id="fotocasa:3",
+        first_seen=t0 + timedelta(hours=2),
+        lat=36.85,
+        description=text,
+    )
+    other = make_listing(source="fotocasa", source_id="5", group_id=None, lat=37.5, first_seen=None)
+    result = regroup([newer_a, old_b, newer_b, old_a, other])
+    assert result.moves == {"fotocasa:3": "pisos:1"}
+    assert sorted(x.id for x in result.changed) == ["fotocasa:3", "pisos:4"]
+    assert {newer_a.group_id, newer_b.group_id, old_a.group_id} == {"pisos:1"}
+    again = regroup([newer_a, old_b, newer_b, old_a, other])
+    assert again.moves == {} and again.changed == []  # idempotent
+
+
+def test_regroup_prefers_known_first_seen_and_breaks_ties_by_id() -> None:
+    from datetime import UTC, datetime
+
+    from scraper.dedupe import regroup
+
+    t0 = datetime(2026, 11, 25, tzinfo=UTC)
+    unknown = make_listing(source="a", source_id="1", group_id="a:1", first_seen=None)
+    known = make_listing(source="b", source_id="2", group_id="b:2", first_seen=t0)
+    assert regroup([unknown, known]).moves == {"a:1": "b:2"}
+    same_a = make_listing(source="c", source_id="1", group_id="c:1", first_seen=t0)
+    same_b = make_listing(source="d", source_id="1", group_id="d:1", first_seen=t0)
+    assert regroup([same_b, same_a]).moves == {"d:1": "c:1"}
+    unknown_a = make_listing(source="a", source_id="1", group_id="a:1", first_seen=None)
+    unknown_e = make_listing(source="e", source_id="1", group_id="e:1", first_seen=None)
+    assert regroup([unknown_e, unknown_a]).moves == {"e:1": "a:1"}
+
+
+def test_description_match_overrides_distance_but_not_size() -> None:
+    from scraper.dedupe import description_similarity
+
+    text = " ".join(f"word{i}" for i in range(40))
+    a = make_listing(source_id="1", description=text)
+    far = make_listing(source="x", source_id="2", description=text, lat=36.95)  # ~12 km away
+    assert description_similarity(a, far) == 1.0 and is_duplicate(a, far)
+    template = " ".join(f"word{i}" for i in range(25)) + " " + " ".join(f"o{i}" for i in range(15))
+    assert description_similarity(a, make_listing(source_id="3", description=template)) < 0.9
+    other_size = make_listing(source="x", source_id="4", description=text, lat=36.95, area_m2=95)
+    assert not is_duplicate(a, other_size)  # same agency template, different flat
+    short = make_listing(source="x", source_id="5", description="piso bonito", lat=36.95)
+    assert description_similarity(make_listing(description="piso bonito"), short) == 0.0

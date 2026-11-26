@@ -183,7 +183,7 @@ def test_cli_dry_run(
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     assert run_module.main(["--max-details", "5"]) == 0
     out = capsys.readouterr().out
-    assert "matches=1" in out and "regroup      merged=0" in out
+    assert "matches=1" in out and "regroup      merged=0 cards" in out
     assert (tmp_path / "l.json").exists()
 
     blocked = FakeSource([], {}, search_error=SourceBlocked("x"))
