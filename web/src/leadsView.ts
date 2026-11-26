@@ -4,6 +4,7 @@
 import {
   DISCARD_REASONS,
   DOCUMENTS,
+  documentsDone,
   type DocItem,
   isUrgent,
   type Lead,
@@ -150,21 +151,45 @@ export function lastEventText(e: LeadEvent, people: Record<string, string>): str
   return `${who}: ${body}`;
 }
 
-// --- "Em processo" page -----------------------------------------------------------
+// --- "Documentos" and "Em processo" pages -----------------------------------------------------------
 
-export function documentsHtml(docs: DocItem[]): string {
-  const ready = new Map(docs.map((d) => [d.key, d.ready]));
-  const done = DOCUMENTS.filter((d) => ready.get(d.key)).length;
+export function documentsHtml(docs: DocItem[], people: Record<string, string>): string {
+  const byKey = new Map(docs.map((d) => [d.key, d]));
+  const done = documentsDone(docs);
+  const emails = Object.keys(people);
+  const items = DOCUMENTS.map((d) => {
+    const doc = byKey.get(d.key);
+    const link = d.link
+      ? ` <a href="${esc(safeUrl(d.link))}" target="_blank" rel="noopener">Abrir →</a>`
+      : "";
+    const owner = emails.length
+      ? `<select data-doc-owner="${esc(d.key)}" aria-label="Quem trata de ${esc(d.label)}">
+          <option value="">Quem trata?</option>${emails
+            .map(
+              (e) =>
+                `<option value="${esc(e)}" ${doc?.owner === e ? "selected" : ""}>${esc(
+                  displayName(e, people),
+                )}</option>`,
+            )
+            .join("")}
+        </select>`
+      : "";
+    return `<li class="doc">
+      <label class="row"><input type="checkbox" data-doc="${esc(d.key)}" ${doc?.ready ? "checked" : ""} /> ${esc(
+        d.label,
+      )}</label>
+      <p class="doc-hint muted">${esc(d.hint)}${link}</p>
+      <div class="doc-edit">${owner}<input type="text" data-doc-note="${esc(d.key)}" value="${esc(
+        doc?.note ?? "",
+      )}" placeholder="Nota (ex.: pedido a 3/12)" aria-label="Nota sobre ${esc(d.label)}" /></div>
+    </li>`;
+  }).join("");
   return `
-  <details class="docs">
-    <summary><b>Documentos para candidatura</b> <span class="muted">${done}/${DOCUMENTS.length} prontos</span></summary>
-    <ul>${DOCUMENTS.map(
-      (d) =>
-        `<li><label class="row"><input type="checkbox" data-doc="${esc(d.key)}" ${
-          ready.get(d.key) ? "checked" : ""
-        } /> ${esc(d.label)}</label></li>`,
-    ).join("")}</ul>
-  </details>`;
+  <div class="docs">
+    <h2>Documentos para candidatura <span class="muted">${done}/${DOCUMENTS.length} prontos</span></h2>
+    <p class="muted small">Para a casa, não por anúncio. Tem tudo em PDF para responder no próprio dia.</p>
+    <ul>${items}</ul>
+  </div>`;
 }
 
 export function stageFilterHtml(

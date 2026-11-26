@@ -112,7 +112,7 @@ class SupabaseBackend implements Backend {
       this.db.from("search_summary").select("criteria,counts,updated_at").eq("id", "latest").maybeSingle(),
       this.db.from("leads").select("*"),
       this.db.from("lead_events").select("group_id,user_email,kind,body,at").order("at"),
-      this.db.from("documents").select("key,ready,note"),
+      this.db.from("documents").select("*"),
     ]);
     for (const res of [listings, reactions, runs, people, summary, leads, events, documents]) {
       if (res.error) throw res.error;

@@ -2,6 +2,9 @@ import "./styles.css";
 import { type Backend, createBackend, type LeadUpdate, NotAllowedError, RateLimitedError, type Snapshot } from "./data";
 import {
   contactMessage,
+  DOCUMENTS,
+  documentsDone,
+  type DocItem,
   type Lead,
   mailtoUrl,
   findEmail,
@@ -52,7 +55,7 @@ import {
 const app = document.querySelector<HTMLDivElement>("#app") as HTMLDivElement;
 const backend: Backend = createBackend();
 
-type Page = "homes" | "process";
+type Page = "homes" | "process" | "docs";
 
 const state = {
   me: "",
@@ -71,7 +74,9 @@ const state = {
 };
 
 function pageFromHash(): Page {
-  return location.hash === "#processo" ? "process" : "homes";
+  if (location.hash === "#processo") return "process";
+  if (location.hash === "#documentos") return "docs";
+  return "homes";
 }
 
 function loadFilters(): Filters {
@@ -156,6 +161,7 @@ function renderShell(): void {
       <footer class="health"></footer>
     </section>
     <section class="page-process" hidden></section>
+    <section class="page-docs" hidden></section>
     <dialog class="sheet"></dialog>`;
 }
 
@@ -180,7 +186,12 @@ function renderPagesNav(): void {
     <a href="#" class="page-link" aria-current="${state.page === "homes" ? "page" : "false"}">Casas</a>
     <a href="#processo" class="page-link" aria-current="${
       state.page === "process" ? "page" : "false"
-    }">Em processo <span class="tab-count">${inProcessCount()}</span></a>`;
+    }">Em processo <span class="tab-count">${inProcessCount()}</span></a>
+    <a href="#documentos" class="page-link" aria-current="${
+      state.page === "docs" ? "page" : "false"
+    }">Documentos <span class="tab-count">${documentsDone(state.snapshot?.documents ?? [])}/${
+      DOCUMENTS.length
+    }</span></a>`;
 }
 
 async function render(): Promise<void> {
@@ -191,10 +202,16 @@ async function render(): Promise<void> {
   const process = app.querySelector(".page-process") as HTMLElement;
   homes.hidden = state.page !== "homes";
   process.hidden = state.page !== "process";
+  const docs = app.querySelector(".page-docs") as HTMLElement;
+  docs.hidden = state.page !== "docs";
   const toggle = app.querySelector("[data-action=toggle-mode]") as HTMLElement;
   toggle.hidden = state.page !== "homes";
   if (state.page === "process") {
     renderProcess(process, snap);
+    return;
+  }
+  if (state.page === "docs") {
+    docs.innerHTML = documentsHtml(snap.documents, snap.people);
     return;
   }
   const now = new Date();
@@ -238,7 +255,6 @@ function renderProcess(el: HTMLElement, snap: Snapshot): void {
     now,
   );
   el.innerHTML = `
-    ${documentsHtml(snap.documents)}
     ${stageFilterHtml(stageCounts(state.cards, state.leads), state.processStage, state.showFinished)}
     ${
       !rows.length && state.processStage
@@ -520,10 +536,14 @@ app.addEventListener("submit", async (event) => {
 app.addEventListener("change", async (event) => {
   const target = event.target as HTMLElement;
   const snap = state.snapshot as Snapshot;
-  if (target instanceof HTMLInputElement && target.dataset.doc) {
-    const key = target.dataset.doc;
-    const doc = { key, ready: target.checked, note: null };
-    snap.documents = [...snap.documents.filter((d) => d.key !== key), doc];
+  const docKey = target.dataset.doc ?? target.dataset.docOwner ?? target.dataset.docNote;
+  if (docKey && (target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
+    const before = snap.documents.find((d) => d.key === docKey);
+    const doc: DocItem = { key: docKey, ready: false, note: null, owner: null, ...before };
+    if (target.dataset.doc) doc.ready = (target as HTMLInputElement).checked;
+    if (target.dataset.docOwner) doc.owner = target.value || null;
+    if (target.dataset.docNote) doc.note = target.value.trim() || null;
+    snap.documents = [...snap.documents.filter((d) => d.key !== docKey), doc];
     try {
       await backend.saveDocument(doc);
     } catch {

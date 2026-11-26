@@ -151,9 +151,11 @@ create table if not exists documents (
   key text primary key,
   ready boolean not null default false,
   note text,
+  owner text,
   updated_by text not null default (auth.jwt() ->> 'email'),
   updated_at timestamptz not null default now()
 );
+alter table documents add column if not exists owner text;  -- for tables made before owner existed
 
 grant all on leads, lead_events, documents to service_role;
 grant usage, select on all sequences in schema public to service_role, authenticated;

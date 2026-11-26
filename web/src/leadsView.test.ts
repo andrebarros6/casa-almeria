@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Lead, LeadEvent, Row } from "./leads";
+import { documentsDone, type Lead, type LeadEvent, type Row } from "./leads";
 import {
   contactSheetHtml,
   documentsHtml,
@@ -91,10 +91,37 @@ describe("lead sheet", () => {
 
 describe("Em processo page", () => {
   it("renders the documents checklist with progress", () => {
-    const el = dom(documentsHtml([{ key: "dni_nie", ready: true, note: null }]));
-    expect(el.querySelector("summary")?.textContent).toContain("1/6 prontos");
+    const el = dom(documentsHtml([{ key: "dni_nie", ready: true, note: null }], PEOPLE));
+    expect(el.querySelector("h2")?.textContent).toContain("1/7 prontos");
     expect((el.querySelector('[data-doc="dni_nie"]') as HTMLInputElement).checked).toBe(true);
     expect((el.querySelector('[data-doc="aval"]') as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("shows how to get each document, its owner and note", () => {
+    const [email] = Object.keys(PEOPLE);
+    const docs = [{ key: "renta", ready: false, note: "<pedido>", owner: email }];
+    const el = dom(documentsHtml(docs, PEOPLE));
+    const item = el.querySelector('[data-doc="renta"]')?.closest("li") as HTMLElement;
+    expect(item.textContent).toContain("Portal das Finanças");
+    expect(item.querySelector("a")?.getAttribute("href")).toMatch(/^https:\/\//);
+    expect((item.querySelector("[data-doc-owner]") as HTMLSelectElement).value).toBe(email);
+    expect((item.querySelector("[data-doc-note]") as HTMLInputElement).value).toBe("<pedido>");
+    expect(el.innerHTML).not.toContain("<pedido>");
+  });
+
+  it("counts only known documents that are ready", () => {
+    const docs = [
+      { key: "nominas", ready: true, note: null },
+      { key: "fianza", ready: false, note: null },
+      { key: "old_key", ready: true, note: null },
+    ];
+    expect(documentsDone(docs)).toBe(1);
+  });
+
+  it("hides the owner picker when nobody is known (preview mode)", () => {
+    const el = dom(documentsHtml([], {}));
+    expect(el.querySelector("[data-doc-owner]")).toBeNull();
+    expect(el.querySelectorAll("[data-doc-note]").length).toBe(7);
   });
 
   it("renders stage chips with counts, hiding finished unless asked", () => {

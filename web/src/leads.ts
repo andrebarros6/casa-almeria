@@ -40,6 +40,8 @@ export interface DocItem {
   key: string;
   ready: boolean;
   note: string | null;
+  /** Email of whoever is getting this document; null = nobody yet. */
+  owner?: string | null;
 }
 
 export const STAGES: { key: Stage; label: string; active: boolean }[] = [
@@ -62,15 +64,48 @@ export const STAGE_LABELS = Object.fromEntries(STAGES.map((s) => [s.key, s.label
 
 export const DISCARD_REASONS = ["Caro demais", "Zona", "Estado da casa", "Senhorio", "Outra"];
 
-/** Household documents Spanish landlords usually ask for. */
-export const DOCUMENTS: { key: string; label: string }[] = [
-  { key: "dni_nie", label: "DNI / NIE" },
-  { key: "nominas", label: "Nóminas (últimos 3 meses)" },
-  { key: "contrato_trabajo", label: "Contrato de trabajo" },
-  { key: "renta", label: "Declaración de la renta" },
-  { key: "aval", label: "Aval bancario (se pedirem)" },
-  { key: "fianza", label: "Fianza + 1.º mês disponível" },
+/** Household documents Spanish landlords usually ask for, with how to get each one. */
+export const DOCUMENTS: { key: string; label: string; hint: string; link?: string }[] = [
+  {
+    key: "dni_nie",
+    label: "DNI / NIE",
+    hint: "O NIE é para a vida. Procura-o em papéis antigos; senão, cita na Extranjería.",
+    link: "https://sede.administracionespublicas.gob.es/icpplus/index.html",
+  },
+  { key: "nominas", label: "Nóminas (últimos 3 meses)", hint: "Pede os 3 últimos à empresa, em PDF." },
+  {
+    key: "contrato_trabajo",
+    label: "Contrato de trabajo",
+    hint: "Cópia assinada. Se ainda não há nóminas, junta carta da empresa.",
+  },
+  {
+    key: "vida_laboral",
+    label: "Informe de vida laboral",
+    hint: "Online na Seguridad Social, com Cl@ve ou certificado digital.",
+    link: "https://portal.seg-social.gob.es/",
+  },
+  {
+    key: "renta",
+    label: "Declaración de la renta (ou IRS)",
+    hint: "Sem renda espanhola? IRS Modelo 3 e nota de liquidação, no Portal das Finanças.",
+    link: "https://www.portaldasfinancas.gov.pt/",
+  },
+  {
+    key: "aval",
+    label: "Aval bancario (se pedirem)",
+    hint: "Só se exigirem. Antes, propõe garantia extra (máx. 2 meses por lei).",
+  },
+  {
+    key: "fianza",
+    label: "Fianza + 1.º mês disponível",
+    hint: "Fiança é 1 mês por lei. Honorários de agência: paga o senhorio.",
+  },
 ];
+
+export function documentsDone(docs: DocItem[]): number {
+  const ready = new Set(docs.filter((d) => d.ready).map((d) => d.key));
+  return DOCUMENTS.filter((d) => ready.has(d.key)).length;
+}
 
 const DAY_MS = 86_400_000;
 
