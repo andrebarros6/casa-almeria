@@ -28,6 +28,8 @@ import {
   type View,
   type SearchSummary,
 } from "./logic";
+import type { Stage } from "./leads";
+import { stagePillHtml } from "./leadsView";
 
 export const COPY = {
   loginTitle: "Casa Almería",
@@ -158,6 +160,7 @@ export function cardHtml(
   people: Record<string, string>,
   lastVisit: string | null,
   now: Date,
+  stage: Stage | null = null,
 ): string {
   const l = card.main;
   const catchText = catchLine(card);
@@ -200,6 +203,11 @@ export function cardHtml(
       <p class="place">${esc(place(l))} · <span class="muted">${relativeDay(card.firstSeen, now)}</span></p>
       ${featureChips ? `<div class="chips">${featureChips}</div>` : ""}
       <p class="sources">${sources}</p>
+      <div class="lead-row">${
+        stage && stage !== "interessa"
+          ? `<button class="stage-cell" data-action="open-lead">${stagePillHtml(stage)}</button>`
+          : `<button class="btn-ghost small" data-action="contact">Contactar</button>`
+      }</div>
       ${reactionsHtml(card, me, people)}
     </div>
   </article>`;
