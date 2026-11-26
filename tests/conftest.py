@@ -37,3 +37,13 @@ def make_listing(**overrides: Any) -> Listing:
     }
     data.update(overrides)
     return Listing(**data)
+
+
+@pytest.fixture(autouse=True)
+def no_geocoding(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    """Never call Nominatim from tests (the CLI geocodes the commute address each run)."""
+    if request.module.__name__.endswith("test_geo"):
+        return
+    import scraper.run
+
+    monkeypatch.setattr(scraper.run, "commute_point", lambda address: None)

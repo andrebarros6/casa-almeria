@@ -11,6 +11,7 @@ from pathlib import Path
 
 from scraper.config import load_spec
 from scraper.dedupe import regroup
+from scraper.geo import commute_point
 from scraper.notify import Telegram, notify
 from scraper.pipeline import RunOutcome, run_source
 from scraper.sources import select
@@ -77,7 +78,8 @@ def main(argv: list[str] | None = None) -> int:
         store.upsert(regrouping.changed)
         store.move_reactions(regrouping.moves)
     print(f"regroup      merged={len(regrouping.moves)} cards")
-    store.save_summary(build_summary(spec, store.current_reasons(), datetime.now(UTC)))
+    point = commute_point(spec.commute.address)
+    store.save_summary(build_summary(spec, store.current_reasons(), datetime.now(UTC), point))
 
     should_notify = args.notify if args.notify is not None else not args.dry_run
     if should_notify:

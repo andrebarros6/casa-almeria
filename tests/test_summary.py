@@ -39,3 +39,10 @@ def test_build_summary(spec: SearchSpec) -> None:
     }
     assert list(s["counts"]["discarded"]) == ["short_term", "price", "other"]  # display order
     assert s["updated_at"] == now.isoformat()
+
+
+def test_build_summary_includes_commute_point(spec: SearchSpec) -> None:
+    now = datetime(2026, 11, 26, 7, tzinfo=UTC)
+    assert build_summary(spec, [], now)["criteria"]["commute"] is None
+    s = build_summary(spec, [], now, (36.84, -2.46))
+    assert s["criteria"]["commute"] == {"lat": 36.84, "lng": -2.46}
