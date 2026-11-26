@@ -27,6 +27,15 @@ Find and sign a suitable long-term rental faster and with less daily effort, and
 - **Chip row:** always-visible one-tap filters (≤900 €, 3+ quartos, mobilado, terraço, garagem, animais, ar cond., Almería / Poniente / Levante). The "Filtros" sheet keeps the rest.
 - **Stronger dedupe:** same bedrooms, price ±3% and m² ±5%, plus *either* pins within 150 m *or* descriptions ≥90% identical. Portals geocode the same flat up to km apart, and agencies reuse template text for different flats. Whole cards merge, ❤️/notes move to the surviving card, and the map uses the median pin of a card's listings.
 
+### Must (v1.2, agreed 2026-11-26): lead tracker
+Promoted from "visit tracking" under *Should*.
+- **Stages per card**, shared by both: Interessa (❤️) → Contactado → Respondeu → Visita marcada → Visitado → Candidatura → Fechado, with side exits Sem resposta, Já alugado and Descartado (with a reason).
+- **Contacting:** the portal contact form is the main channel. A ready-made Spanish message from both partners is copied to the clipboard and the listing opens, so it can be pasted into the form. An email button appears only when the listing shows an address (2/261 today). Nothing is ever sent automatically. "Já enviei" logs who contacted, how and when.
+- **Timeline per lead:** stage changes, replies, visit date and time, and notes, with who and when.
+- **"Contactos" tab:** leads grouped by stage, next action first.
+- **Telegram nudges** in the daily digest: no reply 2 and 5 days after contact, and visits in the next 24 h.
+- **Documents checklist** (household, not per flat): DNI/NIE, nóminas, contrato de trabalho, declaração de renda, aval, fianza + first month.
+
 ### Could (later)
 - "Ask Claude" box (sentence → filters, on Claude Sonnet 5.5, via a logged-in-only Supabase Edge Function), with daily Claude tagging of richer features (sea view, natural light, quiet…).
 
