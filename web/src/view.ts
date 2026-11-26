@@ -37,6 +37,11 @@ export const COPY = {
   sendLink: "Enviar link de entrada",
   linkSent: (email: string) => `Link enviado para ${email}. Abre-o neste telemóvel.`,
   notAllowed: "Esse email não está na lista. Usa o email que combinámos.",
+  linkTooSoon: (seconds: number) =>
+    `Acabámos de pedir um link para este email. Espera ${seconds} s e tenta outra vez.`,
+  linkHourlyLimit:
+    "Já pedimos muitos links nesta hora. Abre o último email que chegou ou tenta daqui a uma hora.",
+  linkSendError: "Não consegui enviar o link. Verifica a ligação e tenta outra vez.",
   loading: "A juntar os anúncios…",
   loadError:
     "Não consegui carregar os anúncios. Falhou a ligação ao servidor. Tenta outra vez daqui a um minuto.",

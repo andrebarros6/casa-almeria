@@ -37,6 +37,23 @@ export interface Backend {
 
 export class NotAllowedError extends Error {}
 
+/** Supabase refused to send another email yet. `seconds` is the wait it asked for, if it said. */
+export class RateLimitedError extends Error {
+  constructor(public seconds: number | null) {
+    super("rate limited");
+  }
+}
+
+/** Map a Supabase Auth error to what the login screen should tell us. */
+export function linkError(err: { message: string; status?: number }): Error {
+  if (/signups not allowed|not found|invalid/i.test(err.message)) return new NotAllowedError();
+  const wait = /after (\d+) seconds?/i.exec(err.message);
+  if (err.status === 429 || wait || /rate limit/i.test(err.message)) {
+    return new RateLimitedError(wait ? Number(wait[1]) : null);
+  }
+  return err instanceof Error ? err : new Error(err.message);
+}
+
 const URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
@@ -75,10 +92,7 @@ class SupabaseBackend implements Backend {
       // Only the two whitelisted emails have accounts; no sign-ups.
       options: { emailRedirectTo: window.location.href.split("#")[0], shouldCreateUser: false },
     });
-    if (error) {
-      if (/signups not allowed|not found|invalid/i.test(error.message)) throw new NotAllowedError();
-      throw error;
-    }
+    if (error) throw linkError(error);
   }
 
   async signOut(): Promise<void> {

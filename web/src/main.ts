@@ -1,5 +1,5 @@
 import "./styles.css";
-import { type Backend, createBackend, type LeadUpdate, NotAllowedError, type Snapshot } from "./data";
+import { type Backend, createBackend, type LeadUpdate, NotAllowedError, RateLimitedError, type Snapshot } from "./data";
 import {
   contactMessage,
   type Lead,
@@ -124,7 +124,14 @@ async function onLogin(form: HTMLFormElement): Promise<void> {
     await backend.sendLink(email);
     msg.textContent = COPY.linkSent(email);
   } catch (err) {
-    msg.textContent = err instanceof NotAllowedError ? COPY.notAllowed : COPY.loadError;
+    msg.textContent =
+      err instanceof NotAllowedError
+        ? COPY.notAllowed
+        : err instanceof RateLimitedError
+          ? err.seconds !== null
+            ? COPY.linkTooSoon(err.seconds)
+            : COPY.linkHourlyLimit
+          : COPY.linkSendError;
   }
 }
 
