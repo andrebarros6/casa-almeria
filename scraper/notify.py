@@ -11,16 +11,21 @@ import logging
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 
-from scraper.models import Listing
+from scraper.models import Lead, Listing
 from scraper.pipeline import RunOutcome
 from scraper.store import SourceRun, Store
 
 log = logging.getLogger(__name__)
 
 MAX_PHOTO_MESSAGES = 10
+NUDGE_DAYS = (2, 5)  # remind about unanswered contacts on these days, not every day
+VISIT_WINDOW = timedelta(hours=36)
+MADRID = ZoneInfo("Europe/Madrid")
 FAILURE_STREAK = 2
 SOURCE_LABELS = {
     "pisos": "pisos.com",
@@ -118,18 +123,52 @@ def failing_sources(store: Store, outcomes: Sequence[RunOutcome]) -> list[Source
     return failing
 
 
+def when_text(at: datetime, now: datetime) -> str:
+    """'hoje 18:00' / 'amanhã 18:00' / '28/11 18:00', in Madrid time."""
+    local, today = at.astimezone(MADRID), now.astimezone(MADRID).date()
+    time = local.strftime("%H:%M")
+    if local.date() == today:
+        return f"hoje {time}"
+    if local.date() == today + timedelta(days=1):
+        return f"amanhã {time}"
+    return f"{local:%d/%m} {time}"
+
+
+def build_nudges(pairs: Sequence[tuple[Lead, Listing]], now: datetime) -> list[str]:
+    """Unanswered contacts (on day 2 and 5) and visits in the next 36 hours."""
+    lines = []
+    for lead, listing in pairs:
+        label = f"{_e(place(listing)) or 'anúncio'} · {euros(listing.price_eur)}"
+        where = f'<a href="{_e(listing.url)}">{label}</a>'
+        if lead.stage == "contactado":
+            days = (now - lead.stage_at).days
+            if days in NUDGE_DAYS:
+                lines.append(f"⏳ Sem resposta há {days} dias: {where}. Insistir?")
+        elif (
+            lead.stage == "visita"
+            and lead.next_action_at
+            and now <= lead.next_action_at <= now + VISIT_WINDOW
+        ):
+            lines.append(f"📅 Visita {when_text(lead.next_action_at, now)}: {where}")
+    return lines
+
+
 @dataclass
 class Digest:
     new: list[Listing] = field(default_factory=list)
     drops: list[tuple[Listing, int]] = field(default_factory=list)  # (listing, old price)
     warnings: list[SourceRun] = field(default_factory=list)
+    nudges: list[str] = field(default_factory=list)
     page_url: str | None = None
 
     def is_empty(self) -> bool:
-        return not (self.new or self.drops or self.warnings)
+        return not (self.new or self.drops or self.warnings or self.nudges)
 
     def summary(self) -> str | None:
         lines: list[str] = []
+        if self.nudges:
+            lines.append("<b>Para tratar:</b>")
+            lines.extend(self.nudges)
         extra = len(self.new) - MAX_PHOTO_MESSAGES
         if self.new:
             n = len(self.new)
@@ -156,7 +195,10 @@ class Digest:
 
 
 def build_digest(
-    outcomes: Sequence[RunOutcome], store: Store, page_url: str | None = None
+    outcomes: Sequence[RunOutcome],
+    store: Store,
+    page_url: str | None = None,
+    nudges: Sequence[str] = (),
 ) -> Digest:
     new = truly_new([item for o in outcomes for item in o.new_matches])
     drops = []
@@ -165,7 +207,11 @@ def build_digest(
             if len(item.price_history) >= 2:
                 drops.append((item, item.price_history[-2].price_eur))
     return Digest(
-        new=new, drops=drops, warnings=failing_sources(store, outcomes), page_url=page_url
+        new=new,
+        drops=drops,
+        warnings=failing_sources(store, outcomes),
+        nudges=list(nudges),
+        page_url=page_url,
     )
 
 
@@ -209,11 +255,21 @@ class Telegram:
         return sent
 
 
-def notify(outcomes: Sequence[RunOutcome], store: Store, telegram: Telegram | None) -> int:
+def notify(
+    outcomes: Sequence[RunOutcome],
+    store: Store,
+    telegram: Telegram | None,
+    include_nudges: bool = False,
+    now: datetime | None = None,
+) -> int:
     if telegram is None:
         log.info("Telegram not configured; skipping digest")
         return 0
-    digest = build_digest(outcomes, store, os.environ.get("PAGE_URL"))
+    nudges: list[str] = []
+    if include_nudges:  # once a day, from the cloud run only, so they don't arrive twice
+        moment = now or datetime.now(MADRID)
+        nudges = build_nudges(store.leads_with_listings(["contactado", "visita"]), moment)
+    digest = build_digest(outcomes, store, os.environ.get("PAGE_URL"), nudges)
     if digest.is_empty():
         return 0
     try:

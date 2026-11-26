@@ -7,18 +7,20 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from scraper.models import PricePoint
+from scraper.models import Lead, PricePoint
 from scraper.notify import (
     MAX_PHOTO_MESSAGES,
     Digest,
     Telegram,
     build_digest,
+    build_nudges,
     caption,
     catch_line,
     failing_sources,
     notify,
     place,
     truly_new,
+    when_text,
 )
 from scraper.pipeline import RunOutcome
 from scraper.store import JsonStore, SourceRun
@@ -204,3 +206,51 @@ def test_notify_sends_and_survives_telegram_errors(
     with caplog.at_level(logging.WARNING):
         assert notify([outcome(new_matches=[make_listing()])], JsonStore(), _telegram(broken)) == 0
     assert "TOKEN" not in caplog.text  # the token must never reach the logs
+
+
+# --- lead nudges ----------------------------------------------------------
+
+
+def _lead(group: str, stage: str, stage_at: datetime, next_at: datetime | None = None) -> Lead:
+    return Lead(group_id=group, stage=stage, stage_at=stage_at, next_action_at=next_at)
+
+
+MORNING = datetime(2026, 11, 26, 7, tzinfo=UTC)  # 08:00 in Madrid
+
+
+def test_when_text_in_madrid_time() -> None:
+    assert when_text(datetime(2026, 11, 26, 17, tzinfo=UTC), MORNING) == "hoje 18:00"
+    assert when_text(datetime(2026, 11, 27, 8, tzinfo=UTC), MORNING) == "amanhã 09:00"
+    assert when_text(datetime(2026, 11, 30, 8, tzinfo=UTC), MORNING) == "30/11 09:00"
+
+
+def test_build_nudges_only_on_reminder_days_and_upcoming_visits() -> None:
+    flat = make_listing(municipality="Almería", neighbourhood="Zapillo", price_eur=850)
+    pairs = [
+        (_lead("a", "contactado", MORNING - timedelta(days=2, hours=1)), flat),
+        (_lead("b", "contactado", MORNING - timedelta(days=3, hours=1)), flat),  # day 3: quiet
+        (_lead("c", "contactado", MORNING - timedelta(days=5, hours=1)), flat),
+        (_lead("d", "visita", MORNING, MORNING + timedelta(hours=10)), flat),
+        (_lead("e", "visita", MORNING, MORNING + timedelta(days=3)), flat),  # too far ahead
+        (_lead("f", "visita", MORNING, None), flat),  # no date yet
+        (_lead("g", "respondeu", MORNING), flat),
+    ]
+    lines = build_nudges(pairs, MORNING)
+    assert len(lines) == 3
+    assert lines[0].startswith("⏳ Sem resposta há 2 dias: <a href=")
+    assert "Zapillo, Almería · 850 €" in lines[0]
+    assert lines[1].startswith("⏳ Sem resposta há 5 dias")
+    assert lines[2].startswith("📅 Visita hoje 18:00")
+
+
+def test_notify_includes_nudges_only_when_asked() -> None:
+    store = JsonStore()
+    flat = make_listing(group_id="pisos:1")
+    store.upsert([flat])
+    store.leads = [_lead("pisos:1", "contactado", MORNING - timedelta(days=2, hours=1))]
+    rec = Recorder()
+    assert notify([outcome()], store, _telegram(rec)) == 0  # nothing new, nudges off
+    assert notify([outcome()], store, _telegram(rec), include_nudges=True, now=MORNING) == 1
+    text = str(rec.calls[0][1]["text"])
+    assert text.startswith("<b>Para tratar:</b>\n⏳ Sem resposta há 2 dias")
+    assert not Digest(nudges=["x"]).is_empty()

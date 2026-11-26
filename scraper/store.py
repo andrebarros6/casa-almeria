@@ -12,7 +12,7 @@ from typing import Any, Literal, Protocol
 import httpx
 from pydantic import BaseModel
 
-from scraper.models import Listing
+from scraper.models import Lead, Listing
 
 RunStatus = Literal["ok", "blocked", "error"]
 
@@ -40,6 +40,7 @@ class Store(Protocol):
     def current_reasons(self) -> list[str | None]: ...
     def save_summary(self, summary: dict[str, Any]) -> None: ...
     def move_reactions(self, moves: dict[str, str]) -> None: ...
+    def leads_with_listings(self, stages: list[str]) -> list[tuple[Lead, Listing]]: ...
 
 
 def merge_notes(a: str | None, b: str | None) -> str | None:
@@ -64,6 +65,7 @@ class JsonStore:
         self.listings: dict[str, Listing] = {}
         self.runs: list[SourceRun] = []
         self.summary: dict[str, Any] | None = None
+        self.leads: list[Lead] = []  # set by tests; dry runs have no leads
         if path and path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
             for row in data.get("listings", []):
@@ -113,6 +115,23 @@ class JsonStore:
 
     def move_reactions(self, moves: dict[str, str]) -> None:
         """Dry runs have no reactions."""
+
+    def leads_with_listings(self, stages: list[str]) -> list[tuple[Lead, Listing]]:
+        out = []
+        for lead in self.leads:
+            if lead.stage not in stages:
+                continue
+            match = next(
+                (
+                    x
+                    for x in self.listings.values()
+                    if (x.group_id or x.id) == lead.group_id and not x.gone
+                ),
+                None,
+            )
+            if match:
+                out.append((lead, match))
+        return out
 
     def _save(self) -> None:
         if not self.path:
@@ -290,3 +309,23 @@ class SupabaseStore:
                         body={"group_id": new},
                         prefer="return=minimal",
                     )
+
+    def leads_with_listings(self, stages: list[str]) -> list[tuple[Lead, Listing]]:
+        rows = self._request(
+            "GET",
+            "leads",
+            params={
+                "stage": f"in.({','.join(stages)})",
+                "select": "group_id,stage,stage_at,next_action_at",
+            },
+        )
+        leads = [Lead.model_validate(r) for r in rows]
+        if not leads:
+            return []
+        groups = self._in([lead.group_id for lead in leads])
+        rows = self._get_all("listings", {"group_id": groups, "gone": "eq.false", "select": "*"})
+        by_group: dict[str, Listing] = {}
+        for row in rows:
+            listing = Listing.model_validate(row)
+            by_group.setdefault(listing.group_id or listing.id, listing)
+        return [(lead, by_group[lead.group_id]) for lead in leads if lead.group_id in by_group]

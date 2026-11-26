@@ -7,6 +7,7 @@ dependencies = [
   "selectolax>=0.3.21",
   "pydantic>=2.8",
   "pyyaml>=6.0",
+  "tzdata",  # Europe/Madrid times in nudges; Windows has no system tz database
 ]
 
 [project.optional-dependencies]

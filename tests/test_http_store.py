@@ -267,3 +267,51 @@ def test_supabase_moves_reactions_to_the_surviving_card() -> None:
     assert ("PATCH", a_key, {"group_id": "new"}) in writes
     assert ("PATCH", b_new, {"reaction": "reject", "note": "caro"}) in writes
     assert ("DELETE", b_old, None) in writes
+
+
+def test_json_store_leads_with_listings() -> None:
+    from scraper.models import Lead
+
+    store = JsonStore()
+    store.upsert(
+        [
+            make_listing(source_id="1", group_id="g1"),
+            make_listing(source_id="2", group_id="g2", gone=True),
+        ]
+    )
+    store.leads = [
+        Lead(group_id="g1", stage="contactado", stage_at=NOW),
+        Lead(group_id="g2", stage="contactado", stage_at=NOW),  # listing gone
+        Lead(group_id="g1", stage="respondeu", stage_at=NOW),  # other stage
+    ]
+    pairs = store.leads_with_listings(["contactado"])
+    assert [(lead.group_id, listing.id) for lead, listing in pairs] == [("g1", "pisos:1")]
+
+
+def test_supabase_leads_with_listings() -> None:
+    lead_row = {
+        "group_id": "g1",
+        "stage": "visita",
+        "stage_at": NOW.isoformat(),
+        "next_action_at": None,
+    }
+    listing_row = {
+        **make_listing(group_id="g1").model_dump(mode="json"),
+        "id": "pisos:1",
+        "features": [],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/leads"):
+            assert request.url.params["stage"] == "in.(contactado,visita)"
+            return httpx.Response(200, json=[lead_row, {**lead_row, "group_id": "gone"}])
+        return httpx.Response(200, json=[listing_row])
+
+    store = SupabaseStore("https://db.test", "k", client=_client(handler))
+    pairs = store.leads_with_listings(["contactado", "visita"])
+    assert [(lead.group_id, listing.id) for lead, listing in pairs] == [("g1", "pisos:1")]
+
+    empty = SupabaseStore(
+        "https://db.test", "k", client=_client(lambda r: httpx.Response(200, json=[]))
+    )
+    assert empty.leads_with_listings(["visita"]) == []

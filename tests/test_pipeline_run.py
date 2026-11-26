@@ -204,18 +204,22 @@ def test_cli_uses_supabase_when_configured(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(run_module, "ENV_FILE", Path("none.env"))
     monkeypatch.setattr(run_module, "SupabaseStore", FakeSupabase)
     monkeypatch.setattr(run_module, "select", lambda which: [])
-    sent: list[int] = []
+    sent: list[tuple[int, bool]] = []
 
-    def fake_notify(outcomes: list[object], store: object, telegram: object) -> int:
-        sent.append(len(outcomes))
+    def fake_notify(
+        outcomes: list[object], store: object, telegram: object, include_nudges: bool = False
+    ) -> int:
+        sent.append((len(outcomes), include_nudges))
         return 0
 
     monkeypatch.setattr(run_module, "notify", fake_notify)
-    assert run_module.main([]) == 0
+    assert run_module.main([]) == 0  # --sources all
     assert created == ["yes"]
-    assert sent == [0]  # real runs notify by default
+    assert sent == [(0, True)]  # real runs notify by default; nudges from cloud/all runs
     assert run_module.main(["--no-notify"]) == 0
-    assert sent == [0]
+    assert sent == [(0, True)]
+    assert run_module.main(["--sources", "local"]) == 0
+    assert sent[-1] == (0, False)  # the PC run doesn't repeat the nudges
 
 
 def test_load_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

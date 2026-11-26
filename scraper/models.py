@@ -81,3 +81,12 @@ class Listing(BaseModel):
     @property
     def id(self) -> str:
         return f"{self.source}:{self.source_id}"
+
+
+class Lead(BaseModel):
+    """A card you're pursuing (managed from the page; the scraper only reads it for nudges)."""
+
+    group_id: str
+    stage: str
+    stage_at: datetime
+    next_action_at: datetime | None = None

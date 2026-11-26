@@ -81,7 +81,8 @@ def main(argv: list[str] | None = None) -> int:
 
     should_notify = args.notify if args.notify is not None else not args.dry_run
     if should_notify:
-        sent = notify(outcomes, store, Telegram.from_env())
+        include_nudges = args.sources in ("cloud", "all")
+        sent = notify(outcomes, store, Telegram.from_env(), include_nudges=include_nudges)
         print(f"telegram     sent={sent}")
 
     return 0 if all(o.run.status == "ok" for o in outcomes) else 1
