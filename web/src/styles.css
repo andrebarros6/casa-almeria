@@ -802,3 +802,10 @@ table.process {
 .page-process .row {
   margin-top: 4px;
 }
+
+.walk {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--text-2);
+  white-space: nowrap;
+}

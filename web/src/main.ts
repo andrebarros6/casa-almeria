@@ -35,6 +35,7 @@ import {
   sourceHealth,
   toggleChip,
   type View,
+  workPoint,
 } from "./logic";
 import {
   cardHtml,
@@ -197,7 +198,10 @@ async function render(): Promise<void> {
     state.criteriaOpen,
   );
   (app.querySelector(".tabs") as HTMLElement).innerHTML = tabsHtml(state.view, counts());
-  (app.querySelector(".filter-bar") as HTMLElement).innerHTML = filterChipsHtml(state.filters);
+  (app.querySelector(".filter-bar") as HTMLElement).innerHTML = filterChipsHtml(
+    state.filters,
+    workPoint(snap.summary) !== null,
+  );
   toggle.textContent = state.mode === "list" ? "Mapa" : "Lista";
   (app.querySelector(".health") as HTMLElement).innerHTML = healthHtml(sourceHealth(snap.runs, now));
 
@@ -238,7 +242,7 @@ function renderProcess(el: HTMLElement, snap: Snapshot): void {
 
 function rebuildCards(): void {
   const snap = state.snapshot as Snapshot;
-  state.cards = buildCards(snap.listings, snap.reactions);
+  state.cards = buildCards(snap.listings, snap.reactions, workPoint(snap.summary));
   state.leads = new Map(snap.leads.map((l) => [l.group_id, l]));
 }
 

@@ -65,8 +65,8 @@ export function tabsHtml(view: View, counts: Record<View, number>): string {
 }
 
 /** Always-visible one-tap chips, then "Filtros" for the rest (with a count of hidden ones). */
-export function filterChipsHtml(f: Filters): string {
-  const chips = QUICK_CHIPS.map(
+export function filterChipsHtml(f: Filters, canWalk = true): string {
+  const chips = QUICK_CHIPS.filter((c) => canWalk || !c.id.startsWith("walk:")).map(
     (c) =>
       `<button class="qchip" data-chip="${esc(c.id)}" aria-pressed="${chipOn(f, c.id)}">${esc(
         c.label,
@@ -200,7 +200,11 @@ export function cardHtml(
           : ""
       }
       ${card.priceDrop ? `<p class="drop">baixou ${formatPrice(card.priceDrop)}</p>` : ""}
-      <p class="place">${esc(place(l))} · <span class="muted">${relativeDay(card.firstSeen, now)}</span></p>
+      <p class="place">${esc(place(l))} · <span class="muted">${relativeDay(card.firstSeen, now)}</span>${
+        card.walkMin !== null && card.walkMin <= 20
+          ? ` <span class="walk" title="Estimativa a pé até ao trabalho">🚶 ${card.walkMin} min</span>`
+          : ""
+      }</p>
       ${featureChips ? `<div class="chips">${featureChips}</div>` : ""}
       <p class="sources">${sources}</p>
       <div class="lead-row">${
@@ -247,6 +251,14 @@ export function filterSheetHtml(f: Filters, areas: string[], sources: string[]):
           .join("")}
       </select>
     </fieldset>
+    <fieldset><legend>A pé do trabalho</legend>
+      <select name="maxWalk">
+        <option value="">qualquer</option>
+        ${[10, 15, 20]
+          .map((m) => `<option value="${m}" ${f.maxWalk === m ? "selected" : ""}>até ${m} min</option>`)
+          .join("")}
+      </select>
+    </fieldset>
     <fieldset><legend>Quartos</legend>
       <select name="minBedrooms">
         <option value="">2+</option>
@@ -284,6 +296,7 @@ export function readFilters(form: HTMLFormElement): Filters {
   };
   return {
     maxPrice: num("maxPrice"),
+    maxWalk: num("maxWalk"),
     minBedrooms: num("minBedrooms"),
     areas: data.getAll("areas").map(String),
     features: data.getAll("features").map(String),

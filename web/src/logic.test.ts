@@ -30,6 +30,8 @@ import {
   sortCards,
   sourceHealth,
   toggleChip,
+  walkMinutes,
+  workPoint,
 } from "./logic";
 import { listing, reaction } from "./test-fixtures";
 
@@ -92,10 +94,11 @@ describe("selection", () => {
         features: ["furnished", "ac"],
         source: "fotocasa",
       }),
-      listing({ id: "c", group_id: "c", first_seen: "2026-11-24T20:00:00Z", commute_min: 10 }),
-      listing({ id: "d", group_id: "d", first_seen: "2026-11-24T21:00:00Z", commute_min: 5 }),
+      listing({ id: "c", group_id: "c", first_seen: "2026-11-24T20:00:00Z", lat: 36.8425 }),
+      listing({ id: "d", group_id: "d", first_seen: "2026-11-24T21:00:00Z", lat: 36.842 }),
     ],
     [reaction({ group_id: "c", reaction: "reject" }), reaction({ group_id: "b" })],
+    [36.842, -2.44], // work: d is 0 min away, c 1 min, a ~3 min
   );
 
   it("new view uses last visit, or the last 24h when there is none", () => {
@@ -151,13 +154,14 @@ describe("selection", () => {
     expect(
       countActiveFilters({
         maxPrice: 900,
+        maxWalk: 10,
         minBedrooms: 3,
         areas: ["a", "b"],
         features: ["ac"],
         sources: ["pisos"],
         showRejected: true,
       }),
-    ).toBe(7);
+    ).toBe(8);
   });
 });
 
@@ -313,5 +317,35 @@ describe("search summary text", () => {
       "89 poucos quartos",
       "74 acima do preço",
     ]);
+  });
+});
+
+
+describe("walking time", () => {
+  it("estimates minutes from the straight line x 1.3 at 5 km/h", () => {
+    expect(walkMinutes([36.84, -2.46], [36.84, -2.46])).toBe(0);
+    // 0.005 deg latitude ~ 556 m -> 723 m walked -> ~9 min
+    expect(walkMinutes([36.84, -2.46], [36.845, -2.46])).toBe(9);
+  });
+
+  it("filters by maximum walk and needs a known location", () => {
+    const near = listing({ id: "n", group_id: "n", lat: 36.841 });
+    const far = listing({ id: "f", group_id: "f", lat: 36.86 });
+    const cards = buildCards([near, far], [], [36.84, -2.44]);
+    const f = { ...EMPTY_FILTERS, maxWalk: 10 };
+    expect(cards.filter((c) => matchesFilters(c, f)).map((c) => c.groupId)).toEqual(["n"]);
+    const unknown = buildCards([near], [])[0]!;
+    expect(unknown.walkMin).toBeNull();
+    expect(matchesFilters(unknown, f)).toBe(false);
+    expect(chipOn(f, "walk:10")).toBe(true);
+    expect(toggleChip(f, "walk:10").maxWalk).toBeNull();
+    expect(toggleChip(EMPTY_FILTERS, "walk:10").maxWalk).toBe(10);
+  });
+
+  it("reads the work point from the summary", () => {
+    expect(workPoint(null)).toBeNull();
+    const base = { criteria: { operation: "rent", max_price_eur: 1, min_bedrooms: 1, property_types: [], areas: [], must_have: "", excludes: [] }, counts: { seen: 0, matching: 0, discarded: {} }, updated_at: "" };
+    expect(workPoint(base)).toBeNull();
+    expect(workPoint({ ...base, criteria: { ...base.criteria, commute: { lat: 1, lng: 2 } } })).toEqual([1, 2]);
   });
 });

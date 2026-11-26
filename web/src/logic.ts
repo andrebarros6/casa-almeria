@@ -69,12 +69,15 @@ export interface Card {
   reactions: Reaction[];
   /** Median of the listings' pins, so one badly geocoded portal can't move the card. */
   point: [number, number] | null;
+  /** Estimated walking minutes to work (null when either location is unknown). */
+  walkMin: number | null;
 }
 
 export type View = "new" | "all" | "liked";
 
 export interface Filters {
   maxPrice: number | null;
+  maxWalk: number | null;
   minBedrooms: number | null;
   areas: string[];
   features: string[];
@@ -84,6 +87,7 @@ export interface Filters {
 
 export const EMPTY_FILTERS: Filters = {
   maxPrice: null,
+  maxWalk: null,
   minBedrooms: null,
   areas: [],
   features: [],
@@ -143,7 +147,11 @@ function priceDrop(listing: Listing): number {
   return first !== undefined && first > listing.price_eur ? first - listing.price_eur : 0;
 }
 
-export function buildCards(listings: Listing[], reactions: Reaction[]): Card[] {
+export function buildCards(
+  listings: Listing[],
+  reactions: Reaction[],
+  work: [number, number] | null = null,
+): Card[] {
   const groups = new Map<string, Listing[]>();
   for (const listing of listings) {
     if (listing.gone || listing.rejected_reason) continue;
@@ -177,7 +185,10 @@ export function buildCards(listings: Listing[], reactions: Reaction[]): Card[] {
       featuresKnown: known.length > 0,
       reactions: reactionsByGroup.get(groupId) ?? [],
       point: medianPoint(group),
+      walkMin: null,
     });
+    const card = cards[cards.length - 1] as Card;
+    card.walkMin = work && card.point ? walkMinutes(work, card.point) : null;
   }
   return cards;
 }
@@ -186,6 +197,23 @@ function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? (sorted[mid] as number) : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
+}
+
+const WALK_DETOUR = 1.3; // streets are ~30% longer than a straight line
+const WALK_M_PER_MIN = 5000 / 60; // 5 km/h
+
+function haversineM(a: [number, number], b: [number, number]): number {
+  const rad = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * rad;
+  const dLng = (b[1] - a[1]) * rad;
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * rad) * Math.cos(b[0] * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6_371_000 * Math.asin(Math.sqrt(h));
+}
+
+/** Straight-line distance x 1.3 at 5 km/h, rounded to whole minutes. */
+export function walkMinutes(from: [number, number], to: [number, number]): number {
+  return Math.round((haversineM(from, to) * WALK_DETOUR) / WALK_M_PER_MIN);
 }
 
 export function medianPoint(listings: Listing[]): [number, number] | null {
@@ -219,6 +247,7 @@ export function matchesFilters(card: Card, f: Filters): boolean {
   const l = card.main;
   if (f.maxPrice !== null && l.price_eur > f.maxPrice) return false;
   if (f.minBedrooms !== null && (l.bedrooms ?? 0) < f.minBedrooms) return false;
+  if (f.maxWalk !== null && (card.walkMin === null || card.walkMin > f.maxWalk)) return false;
   if (f.areas.length && !f.areas.includes(l.area_key ?? "")) return false;
   if (f.sources.length && !card.sources.some((s) => f.sources.includes(s))) return false;
   // A feature filter only passes listings known to have it.
@@ -248,8 +277,8 @@ export function sortCards(cards: Card[], view: View): Card[] {
   return [...cards].sort((a, b) => {
     const furnished = Number(b.features.has("furnished")) - Number(a.features.has("furnished"));
     if (furnished) return furnished;
-    const ca = a.main.commute_min ?? Infinity;
-    const cb = b.main.commute_min ?? Infinity;
+    const ca = a.walkMin ?? Infinity;
+    const cb = b.walkMin ?? Infinity;
     if (ca !== cb) return ca - cb;
     return newestFirst(a, b);
   });
@@ -258,6 +287,7 @@ export function sortCards(cards: Card[], view: View): Card[] {
 export function countActiveFilters(f: Filters): number {
   return (
     Number(f.maxPrice !== null) +
+    Number(f.maxWalk !== null) +
     Number(f.minBedrooms !== null) +
     f.areas.length +
     f.features.length +
@@ -374,6 +404,7 @@ export interface QuickChip {
 
 /** Always-visible one-tap filters. Everything else lives in the Filtros sheet. */
 export const QUICK_CHIPS: QuickChip[] = [
+  { id: "walk:10", label: "≤ 10 min a pé" },
   { id: "price:900", label: "≤ 900 €" },
   { id: "beds:3", label: "3+ quartos" },
   { id: "feature:furnished", label: "mobilado" },
@@ -388,6 +419,7 @@ export const QUICK_CHIPS: QuickChip[] = [
 
 export function chipOn(f: Filters, id: string): boolean {
   const [kind, value = ""] = id.split(":");
+  if (kind === "walk") return f.maxWalk === Number(value);
   if (kind === "price") return f.maxPrice === Number(value);
   if (kind === "beds") return f.minBedrooms === Number(value);
   if (kind === "feature") return f.features.includes(value);
@@ -401,11 +433,18 @@ const toggleIn = (list: string[], value: string) =>
 export function toggleChip(f: Filters, id: string): Filters {
   const [kind, value = ""] = id.split(":");
   const on = chipOn(f, id);
+  if (kind === "walk") return { ...f, maxWalk: on ? null : Number(value) };
   if (kind === "price") return { ...f, maxPrice: on ? null : Number(value) };
   if (kind === "beds") return { ...f, minBedrooms: on ? null : Number(value) };
   if (kind === "feature") return { ...f, features: toggleIn(f.features, value) };
   if (kind === "area") return { ...f, areas: toggleIn(f.areas, value) };
   return f;
+}
+
+/** The work location from the latest search summary, if the scraper found it. */
+export function workPoint(s: SearchSummary | null): [number, number] | null {
+  const c = s?.criteria.commute;
+  return c ? [c.lat, c.lng] : null;
 }
 
 /** Active filters the chip row doesn't show (they live in the sheet). */
@@ -425,6 +464,7 @@ export interface SearchSummary {
     areas: string[];
     must_have: string;
     excludes: string[];
+    commute?: { lat: number; lng: number } | null;
   };
   counts: { seen: number; matching: number; discarded: Record<string, number> };
   updated_at: string;

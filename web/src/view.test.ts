@@ -101,6 +101,13 @@ describe("cardHtml", () => {
     expect(el.querySelector(".react.on-reject")).not.toBeNull();
   });
 
+  it("shows walking minutes only when within 20 min", () => {
+    const [near] = buildCards([listing({ lat: 36.841 })], [], [36.84, -2.44]);
+    expect(dom(cardHtml(near!, "me", {}, null, NOW)).querySelector(".walk")?.textContent).toBe("🚶 2 min");
+    const [far] = buildCards([listing({ lat: 36.9 })], [], [36.84, -2.44]);
+    expect(dom(cardHtml(far!, "me", {}, null, NOW)).querySelector(".walk")).toBeNull();
+  });
+
   it("numbers repeat listings from the same portal", () => {
     const [card] = buildCards(
       [listing(), listing({ id: "pisos:2", source_id: "2", url: "https://www.pisos.com/2" })],
@@ -137,7 +144,8 @@ describe("page parts", () => {
 
   it("renders the quick chip row with pressed state and a count of hidden filters", () => {
     const empty = dom(filterChipsHtml(EMPTY_FILTERS));
-    expect(empty.querySelectorAll(".qchip")).toHaveLength(10);
+    expect(empty.querySelectorAll(".qchip")).toHaveLength(11);
+    expect(dom(filterChipsHtml(EMPTY_FILTERS, false)).querySelectorAll(".qchip")).toHaveLength(10);
     expect(empty.querySelector('[aria-pressed="true"]')).toBeNull();
     expect(empty.querySelector("[data-action=open-filters]")?.textContent).toBe("Filtros");
     expect(empty.querySelector("[data-action=clear-filters]")).toBeNull();
@@ -145,6 +153,7 @@ describe("page parts", () => {
     const el = dom(
       filterChipsHtml({
         maxPrice: 900,
+        maxWalk: null,
         minBedrooms: 4, // not a quick chip -> counted as hidden
         areas: ["west_coast"],
         features: ["ac"],
@@ -179,6 +188,7 @@ describe("page parts", () => {
   it("round-trips the filter sheet through readFilters", () => {
     const filters = {
       maxPrice: 900,
+      maxWalk: 15,
       minBedrooms: 3,
       areas: ["east_coast"],
       features: ["ac", "pool"],
