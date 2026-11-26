@@ -22,8 +22,8 @@ export function renderMap(container: HTMLElement, cards: Card[]): void {
   const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
   const points: L.LatLngExpression[] = [];
   for (const card of cards) {
-    const { lat, lng } = card.main;
-    if (lat === null || lng === null) continue;
+    if (!card.point) continue;
+    const [lat, lng] = card.point;
     points.push([lat, lng]);
     L.circleMarker([lat, lng], {
       radius: 8,

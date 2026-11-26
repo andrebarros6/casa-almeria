@@ -4,7 +4,10 @@ import {
   AREA_LABELS,
   type Card,
   catchLine,
+  chipOn,
   countActiveFilters,
+  criteriaLine,
+  discardLines,
   displayName,
   esc,
   facts,
@@ -12,15 +15,18 @@ import {
   FILTER_FEATURES,
   type Filters,
   formatPrice,
+  hiddenFilterCount,
   initials,
   isNew,
   myReaction,
   place,
+  QUICK_CHIPS,
   relativeDay,
   safeUrl,
   SOURCE_LABELS,
   type SourceHealth,
   type View,
+  type SearchSummary,
 } from "./logic";
 
 export const COPY = {
@@ -56,19 +62,49 @@ export function tabsHtml(view: View, counts: Record<View, number>): string {
     .join("");
 }
 
+/** Always-visible one-tap chips, then "Filtros" for the rest (with a count of hidden ones). */
 export function filterChipsHtml(f: Filters): string {
-  const chips: string[] = [];
-  if (f.maxPrice !== null) chips.push(`≤ ${formatPrice(f.maxPrice)}`);
-  if (f.minBedrooms !== null) chips.push(`${f.minBedrooms}+ quartos`);
-  chips.push(...f.areas.map((a) => AREA_LABELS[a] ?? a));
-  chips.push(...f.features.map((x) => FEATURE_LABELS[x] ?? x));
-  chips.push(...f.sources.map((s) => SOURCE_LABELS[s] ?? s));
-  if (f.showRejected) chips.push("com descartados");
-  const n = countActiveFilters(f);
+  const chips = QUICK_CHIPS.map(
+    (c) =>
+      `<button class="qchip" data-chip="${esc(c.id)}" aria-pressed="${chipOn(f, c.id)}">${esc(
+        c.label,
+      )}</button>`,
+  ).join("");
+  const hidden = hiddenFilterCount(f);
+  const total = countActiveFilters(f);
   return (
-    `<button class="btn-ghost" data-action="open-filters">Filtros${n ? ` (${n})` : ""}</button>` +
-    chips.map((c) => `<span class="chip chip-active">${esc(c)}</span>`).join("")
+    `<div class="qchips" role="group" aria-label="Filtros rápidos">${chips}</div>` +
+    `<div class="filter-actions"><button class="btn-ghost" data-action="open-filters">Filtros${
+      hidden ? ` (+${hidden})` : ""
+    }</button>${
+      total ? `<button class="btn-link-plain" data-action="clear-filters">Limpar</button>` : ""
+    }</div>`
   );
+}
+
+/** "A procurar": the fixed search rules, with how many listings each rule removed. */
+export function summaryHtml(
+  s: SearchSummary | null,
+  cards: number,
+  now: Date,
+  open = false,
+): string {
+  if (!s) return "";
+  const discards = discardLines(s);
+  const when = relativeDay(s.updated_at, now);
+  return `
+    <details class="criteria"${open ? " open" : ""}>
+      <summary><span class="criteria-label">A procurar:</span> ${esc(criteriaLine(s))}
+        <span class="info" aria-label="Detalhes">ⓘ</span></summary>
+      <p>Última pesquisa ${esc(when)}: ${s.counts.seen} anúncios vistos, ${
+        s.counts.matching
+      } passam os critérios (${cards} casas, sem repetidos).</p>
+      ${
+        discards.length
+          ? `<p>Descartados: ${discards.map((d) => esc(d)).join(" · ")}.</p>`
+          : ""
+      }
+    </details>`;
 }
 
 function photosHtml(card: Card): string {

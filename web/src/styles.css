@@ -129,11 +129,86 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 .filter-bar {
+  padding-bottom: 16px;
+}
+/* Quick chips: one row that scrolls sideways on phones, wraps on wide screens. */
+.qchips {
   display: flex;
-  flex-wrap: wrap;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 -16px;
+  padding: 0 16px 4px;
+}
+@media (min-width: 720px) {
+  .qchips {
+    flex-wrap: wrap;
+    overflow: visible;
+    margin: 0;
+    padding: 0;
+  }
+}
+.qchip {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  color: var(--text-2);
+  font-size: 14px;
+  cursor: pointer;
+}
+.qchip[aria-pressed="true"] {
+  background: var(--accent-muted);
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+.filter-actions {
+  display: flex;
   align-items: center;
   gap: 8px;
-  padding-bottom: 16px;
+  margin-top: 8px;
+}
+.btn-link-plain {
+  min-height: 44px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+/* "A procurar": fixed criteria, quiet grey; details open on tap. */
+.criteria {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+.criteria summary {
+  cursor: pointer;
+  list-style: none;
+  line-height: 1.5;
+}
+.criteria summary::-webkit-details-marker {
+  display: none;
+}
+.criteria-label {
+  font-weight: 600;
+  color: var(--text-2);
+}
+.criteria .info {
+  display: inline-block;
+  margin-left: 4px;
+  color: var(--accent);
+  font-size: 14px;
+}
+.criteria p {
+  margin: 8px 0 0;
+  color: var(--text-2);
+  font-size: 14px;
 }
 
 /* --- controls -------------------------------------------------------------- */

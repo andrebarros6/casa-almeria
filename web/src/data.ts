@@ -2,13 +2,14 @@
 // otherwise a local preview that reads /sample.json and keeps reactions in localStorage.
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Listing, Reaction, ReactionKind, SourceRun } from "./logic";
+import type { Listing, Reaction, ReactionKind, SearchSummary, SourceRun } from "./logic";
 
 export interface Snapshot {
   listings: Listing[];
   reactions: Reaction[];
   runs: SourceRun[];
   people: Record<string, string>;
+  summary: SearchSummary | null;
 }
 
 export interface Backend {
@@ -56,7 +57,7 @@ class SupabaseBackend implements Backend {
 
   async load(): Promise<Snapshot> {
     const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
-    const [listings, reactions, runs, people] = await Promise.all([
+    const [listings, reactions, runs, people, summary] = await Promise.all([
       this.db.from("listings").select("*").eq("gone", false).is("rejected_reason", null),
       this.db.from("reactions").select("*"),
       this.db
@@ -64,8 +65,9 @@ class SupabaseBackend implements Backend {
         .select("source,started_at,status,found,new_matches")
         .gte("started_at", since),
       this.db.from("allowed_users").select("email,display_name"),
+      this.db.from("search_summary").select("criteria,counts,updated_at").eq("id", "latest").maybeSingle(),
     ]);
-    for (const res of [listings, reactions, runs, people]) if (res.error) throw res.error;
+    for (const res of [listings, reactions, runs, people, summary]) if (res.error) throw res.error;
     return {
       listings: (listings.data ?? []) as Listing[],
       reactions: (reactions.data ?? []) as Reaction[],
@@ -75,6 +77,7 @@ class SupabaseBackend implements Backend {
           .filter((p) => p.display_name)
           .map((p) => [p.email, p.display_name as string]),
       ),
+      summary: (summary.data ?? null) as SearchSummary | null,
     };
   }
 
@@ -106,12 +109,17 @@ class PreviewBackend implements Backend {
   async load(): Promise<Snapshot> {
     const res = await fetch(`${import.meta.env.BASE_URL}sample.json`);
     if (!res.ok) throw new Error(`sample.json: ${res.status}`);
-    const data = (await res.json()) as { listings: Listing[]; runs: SourceRun[] };
+    const data = (await res.json()) as {
+      listings: Listing[];
+      runs: SourceRun[];
+      summary?: SearchSummary | null;
+    };
     return {
       listings: data.listings,
       runs: data.runs,
       reactions: JSON.parse(localStorage.getItem(PREVIEW_KEY) ?? "[]") as Reaction[],
       people: { [PREVIEW_EMAIL]: "Tu" },
+      summary: data.summary ?? null,
     };
   }
 

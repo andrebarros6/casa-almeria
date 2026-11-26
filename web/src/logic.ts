@@ -67,6 +67,8 @@ export interface Card {
   features: Set<string>;
   featuresKnown: boolean;
   reactions: Reaction[];
+  /** Median of the listings' pins, so one badly geocoded portal can't move the card. */
+  point: [number, number] | null;
 }
 
 export type View = "new" | "all" | "liked";
@@ -174,9 +176,22 @@ export function buildCards(listings: Listing[], reactions: Reaction[]): Card[] {
       features: new Set(known.flatMap((l) => l.features)),
       featuresKnown: known.length > 0,
       reactions: reactionsByGroup.get(groupId) ?? [],
+      point: medianPoint(group),
     });
   }
   return cards;
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? (sorted[mid] as number) : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
+}
+
+export function medianPoint(listings: Listing[]): [number, number] | null {
+  const pins = listings.filter((l) => l.lat !== null && l.lng !== null);
+  if (!pins.length) return null;
+  return [median(pins.map((l) => l.lat as number)), median(pins.map((l) => l.lng as number))];
 }
 
 // --- reactions --------------------------------------------------------------
@@ -348,6 +363,113 @@ export function sourceHealth(runs: SourceRun[], now: Date): SourceHealth[] {
       }
       return { source: run.source, state: "ok", label: name };
     });
+}
+
+// --- quick chips ------------------------------------------------------------
+
+export interface QuickChip {
+  id: string;
+  label: string;
+}
+
+/** Always-visible one-tap filters. Everything else lives in the Filtros sheet. */
+export const QUICK_CHIPS: QuickChip[] = [
+  { id: "price:900", label: "≤ 900 €" },
+  { id: "beds:3", label: "3+ quartos" },
+  { id: "feature:furnished", label: "mobilado" },
+  { id: "feature:terrace", label: "terraço" },
+  { id: "feature:parking", label: "garagem" },
+  { id: "feature:pets", label: "animais" },
+  { id: "feature:ac", label: "ar cond." },
+  { id: "area:almeria_city", label: "Almería" },
+  { id: "area:west_coast", label: "Poniente" },
+  { id: "area:east_coast", label: "Levante" },
+];
+
+export function chipOn(f: Filters, id: string): boolean {
+  const [kind, value = ""] = id.split(":");
+  if (kind === "price") return f.maxPrice === Number(value);
+  if (kind === "beds") return f.minBedrooms === Number(value);
+  if (kind === "feature") return f.features.includes(value);
+  if (kind === "area") return f.areas.includes(value);
+  return false;
+}
+
+const toggleIn = (list: string[], value: string) =>
+  list.includes(value) ? list.filter((x) => x !== value) : [...list, value];
+
+export function toggleChip(f: Filters, id: string): Filters {
+  const [kind, value = ""] = id.split(":");
+  const on = chipOn(f, id);
+  if (kind === "price") return { ...f, maxPrice: on ? null : Number(value) };
+  if (kind === "beds") return { ...f, minBedrooms: on ? null : Number(value) };
+  if (kind === "feature") return { ...f, features: toggleIn(f.features, value) };
+  if (kind === "area") return { ...f, areas: toggleIn(f.areas, value) };
+  return f;
+}
+
+/** Active filters the chip row doesn't show (they live in the sheet). */
+export function hiddenFilterCount(f: Filters): number {
+  const shown = QUICK_CHIPS.filter((c) => chipOn(f, c.id)).length;
+  return countActiveFilters(f) - shown;
+}
+
+// --- search summary ("A procurar") ------------------------------------------
+
+export interface SearchSummary {
+  criteria: {
+    operation: string;
+    max_price_eur: number;
+    min_bedrooms: number;
+    property_types: string[];
+    areas: string[];
+    must_have: string;
+    excludes: string[];
+  };
+  counts: { seen: number; matching: number; discarded: Record<string, number> };
+  updated_at: string;
+}
+
+const MUST_HAVE_LABELS: Record<string, string> = {
+  elevator_or_ac: "elevador ou ar cond.",
+  elevator_and_ac: "elevador e ar cond.",
+  ac_plus_elevator_if_above_1st: "ar cond. (e elevador acima do 1.º andar)",
+};
+
+export const DISCARD_LABELS: Record<string, string> = {
+  short_term: "temporada ou curso escolar",
+  price: "acima do preço",
+  must_have: "sem elevador nem ar cond.",
+  room_share: "quartos partilhados",
+  bedrooms: "poucos quartos",
+  type: "outro tipo de casa",
+  other: "outros motivos",
+};
+
+export function criteriaLine(s: SearchSummary): string {
+  const c = s.criteria;
+  const excludes = c.excludes
+    .map((x) => (x === "short_term" ? "temporada" : x === "room_share" ? "quartos partilhados" : x))
+    .join(" nem ");
+  return [
+    "arrendamento longo",
+    `até ${formatPrice(c.max_price_eur)}`,
+    `${c.min_bedrooms}+ quartos`,
+    MUST_HAVE_LABELS[c.must_have] ?? c.must_have,
+    c.areas.join(", "),
+    excludes ? `sem ${excludes}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** Biggest reason first. (Postgres jsonb doesn't keep key order, so sort here.) */
+export function discardLines(s: SearchSummary): string[] {
+  const order = Object.keys(DISCARD_LABELS);
+  const rank = (key: string) => (order.includes(key) ? order.indexOf(key) : order.length);
+  return Object.entries(s.counts.discarded)
+    .sort(([ka, a], [kb, b]) => b - a || rank(ka) - rank(kb))
+    .map(([key, n]) => `${n} ${DISCARD_LABELS[key] ?? key}`);
 }
 
 // --- safety -----------------------------------------------------------------

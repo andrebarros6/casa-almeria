@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildCards,
   catchLine,
+  chipOn,
+  criteriaLine,
+  discardLines,
   countActiveFilters,
   displayName,
   EMPTY_FILTERS,
@@ -9,19 +12,24 @@ import {
   facts,
   type Filters,
   formatPrice,
+  hiddenFilterCount,
   initials,
   isLiked,
   isNew,
   isRejected,
   type Listing,
   matchesFilters,
+  medianPoint,
   myReaction,
   place,
+  QUICK_CHIPS,
   relativeDay,
+  type SearchSummary,
   safeUrl,
   selectCards,
   sortCards,
   sourceHealth,
+  toggleChip,
 } from "./logic";
 import { listing, reaction } from "./test-fixtures";
 
@@ -237,5 +245,73 @@ describe("legacy rows", () => {
     const [card] = buildCards([legacy], []);
     expect(card!.featuresKnown).toBe(true);
     expect(card!.features.has("furnished")).toBe(true);
+  });
+});
+
+describe("quick chips", () => {
+  it("toggles price, bedrooms, features and areas", () => {
+    let f = EMPTY_FILTERS;
+    for (const id of ["price:900", "beds:3", "feature:terrace", "area:east_coast"]) {
+      expect(chipOn(f, id)).toBe(false);
+      f = toggleChip(f, id);
+      expect(chipOn(f, id)).toBe(true);
+    }
+    expect(f).toMatchObject({ maxPrice: 900, minBedrooms: 3, features: ["terrace"], areas: ["east_coast"] });
+    expect(hiddenFilterCount(f)).toBe(0);
+    for (const id of ["price:900", "beds:3", "feature:terrace", "area:east_coast"]) f = toggleChip(f, id);
+    expect(f).toEqual(EMPTY_FILTERS);
+    expect(toggleChip(f, "bogus:1")).toBe(f);
+    expect(chipOn(f, "bogus:1")).toBe(false);
+    expect(hiddenFilterCount({ ...EMPTY_FILTERS, maxPrice: 800, showRejected: true })).toBe(2);
+    expect(QUICK_CHIPS.every((c) => c.label.length > 0)).toBe(true);
+  });
+});
+
+describe("median pin", () => {
+  it("ignores one badly geocoded portal", () => {
+    const pins = [
+      listing({ lat: 36.84, lng: -2.46 }),
+      listing({ lat: 36.841, lng: -2.461 }),
+      listing({ lat: 36.95, lng: -2.3 }), // 12 km off
+    ];
+    expect(medianPoint(pins)).toEqual([36.841, -2.46]);
+    const two = medianPoint(pins.slice(0, 2))!;
+    expect(two[0]).toBeCloseTo(36.8405, 6);
+    expect(two[1]).toBeCloseTo(-2.4605, 6);
+    expect(medianPoint([listing({ lat: null, lng: null })])).toBeNull();
+    const [card] = buildCards(pins, []);
+    expect(card!.point).toEqual([36.841, -2.46]);
+  });
+});
+
+describe("search summary text", () => {
+  const summary: SearchSummary = {
+    criteria: {
+      operation: "rent",
+      max_price_eur: 1000,
+      min_bedrooms: 2,
+      property_types: ["flat"],
+      areas: ["Almería ciudad"],
+      must_have: "ac_plus_elevator_if_above_1st",
+      excludes: ["short_term", "room_share", "x"],
+    },
+    counts: { seen: 3, matching: 1, discarded: { room_share: 1, mystery: 1 } },
+    updated_at: "2026-11-25T07:00:00Z",
+  };
+
+  it("phrases criteria and discards in PT-PT", () => {
+    expect(criteriaLine(summary)).toBe(
+      "arrendamento longo · até 1000 € · 2+ quartos · ar cond. (e elevador acima do 1.º andar) · Almería ciudad · sem temporada nem quartos partilhados nem x",
+    );
+    expect(criteriaLine({ ...summary, criteria: { ...summary.criteria, must_have: "new_rule", excludes: [] } })).toBe(
+      "arrendamento longo · até 1000 € · 2+ quartos · new_rule · Almería ciudad",
+    );
+    expect(discardLines(summary)).toEqual(["1 quartos partilhados", "1 mystery"]);
+    const unordered = { ...summary, counts: { ...summary.counts, discarded: { price: 74, bedrooms: 89, short_term: 460 } } };
+    expect(discardLines(unordered)).toEqual([
+      "460 temporada ou curso escolar",
+      "89 poucos quartos",
+      "74 acima do preço",
+    ]);
   });
 });

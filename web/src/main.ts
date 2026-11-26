@@ -13,6 +13,7 @@ import {
   type ReactionKind,
   selectCards,
   sourceHealth,
+  toggleChip,
   type View,
 } from "./logic";
 import {
@@ -23,6 +24,7 @@ import {
   filterSheetHtml,
   healthHtml,
   readFilters,
+  summaryHtml,
   tabsHtml,
 } from "./view";
 
@@ -37,6 +39,7 @@ const state = {
   mode: "list" as "list" | "map",
   filters: loadFilters(),
   lastVisit: null as string | null,
+  criteriaOpen: false,
 };
 
 function loadFilters(): Filters {
@@ -105,6 +108,7 @@ function renderShell(): void {
         ${backend.mode === "live" ? `<button class="btn-ghost" data-action="sign-out">Sair</button>` : ""}
       </div>
     </header>
+    <div class="criteria-wrap"></div>
     <nav class="tabs" aria-label="Vistas"></nav>
     <div class="filter-bar"></div>
     <main class="content"><p class="empty">${COPY.loading}</p></main>
@@ -125,6 +129,12 @@ async function render(): Promise<void> {
   const snap = state.snapshot;
   if (!snap) return;
   const now = new Date();
+  (app.querySelector(".criteria-wrap") as HTMLElement).innerHTML = summaryHtml(
+    snap.summary,
+    state.cards.length,
+    now,
+    state.criteriaOpen,
+  );
   (app.querySelector(".tabs") as HTMLElement).innerHTML = tabsHtml(state.view, counts());
   (app.querySelector(".filter-bar") as HTMLElement).innerHTML = filterChipsHtml(state.filters);
   (app.querySelector("[data-action=toggle-mode]") as HTMLElement).textContent =
@@ -203,6 +213,13 @@ function partnerName(): string {
 
 app.addEventListener("click", async (event) => {
   const target = event.target as HTMLElement;
+  const chip = target.closest<HTMLElement>("[data-chip]");
+  if (chip?.dataset.chip) {
+    state.filters = toggleChip(state.filters, chip.dataset.chip);
+    localStorage.setItem("filters", JSON.stringify(state.filters));
+    await render();
+    return;
+  }
   const viewBtn = target.closest<HTMLElement>("[data-view]");
   if (viewBtn) {
     state.view = viewBtn.dataset.view as View;
@@ -247,6 +264,19 @@ app.addEventListener("click", async (event) => {
     }
   }
 });
+
+// Remember whether the "A procurar" details are open, so re-renders don't close them.
+// `toggle` doesn't bubble, hence the capture listener.
+app.addEventListener(
+  "toggle",
+  (event) => {
+    const target = event.target as HTMLElement;
+    if (target instanceof HTMLDetailsElement && target.classList.contains("criteria")) {
+      state.criteriaOpen = target.open;
+    }
+  },
+  true,
+);
 
 app.addEventListener("submit", async (event) => {
   const form = event.target as HTMLFormElement;

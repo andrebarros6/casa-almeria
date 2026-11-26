@@ -9,10 +9,25 @@ import {
   filterSheetHtml,
   healthHtml,
   readFilters,
+  summaryHtml,
   tabsHtml,
 } from "./view";
+import type { SearchSummary } from "./logic";
 
 const NOW = new Date("2026-11-25T10:00:00Z");
+const SUMMARY: SearchSummary = {
+  criteria: {
+    operation: "rent",
+    max_price_eur: 1000,
+    min_bedrooms: 2,
+    property_types: ["flat", "house"],
+    areas: ["Almería ciudad", "Poniente"],
+    must_have: "elevator_or_ac",
+    excludes: ["short_term", "room_share"],
+  },
+  counts: { seen: 948, matching: 261, discarded: { short_term: 98, price: 41 } },
+  updated_at: "2026-11-25T07:00:00Z",
+};
 const PEOPLE = { "me@x.pt": "Sam", "p@x.pt": "Bea" };
 
 function dom(html: string): HTMLElement {
@@ -120,28 +135,45 @@ describe("page parts", () => {
     expect(el.querySelectorAll(".tab")).toHaveLength(3);
   });
 
-  it("summarises active filters as chips", () => {
-    expect(dom(filterChipsHtml(EMPTY_FILTERS)).textContent).toBe("Filtros");
+  it("renders the quick chip row with pressed state and a count of hidden filters", () => {
+    const empty = dom(filterChipsHtml(EMPTY_FILTERS));
+    expect(empty.querySelectorAll(".qchip")).toHaveLength(10);
+    expect(empty.querySelector('[aria-pressed="true"]')).toBeNull();
+    expect(empty.querySelector("[data-action=open-filters]")?.textContent).toBe("Filtros");
+    expect(empty.querySelector("[data-action=clear-filters]")).toBeNull();
+
     const el = dom(
       filterChipsHtml({
         maxPrice: 900,
-        minBedrooms: 3,
-        areas: ["west_coast", "x"],
+        minBedrooms: 4, // not a quick chip -> counted as hidden
+        areas: ["west_coast"],
         features: ["ac"],
-        sources: ["fotocasa"],
-        showRejected: true,
+        sources: ["fotocasa"], // hidden
+        showRejected: false,
       }),
     );
-    expect([...el.querySelectorAll(".chip")].map((c) => c.textContent)).toEqual([
+    expect([...el.querySelectorAll('[aria-pressed="true"]')].map((c) => c.textContent)).toEqual([
       "≤ 900 €",
-      "3+ quartos",
-      "Poniente",
-      "x",
       "ar cond.",
-      "Fotocasa",
-      "com descartados",
+      "Poniente",
     ]);
-    expect(el.querySelector("button")?.textContent).toBe("Filtros (7)");
+    expect(el.querySelector("[data-action=open-filters]")?.textContent).toBe("Filtros (+2)");
+    expect(el.querySelector("[data-action=clear-filters]")?.textContent).toBe("Limpar");
+  });
+
+  it("renders the 'A procurar' summary with discard counts", () => {
+    expect(summaryHtml(null, 0, NOW)).toBe("");
+    const el = dom(summaryHtml(SUMMARY, 166, NOW));
+    expect(el.querySelector("summary")?.textContent).toContain(
+      "arrendamento longo · até 1000 € · 2+ quartos · elevador ou ar cond.",
+    );
+    const text = el.textContent ?? "";
+    expect(text).toContain("Última pesquisa hoje: 948 anúncios vistos, 261 passam os critérios (166 casas");
+    expect(text).toContain("Descartados: 98 temporada ou curso escolar · 41 acima do preço.");
+    const noDiscards = dom(summaryHtml({ ...SUMMARY, counts: { ...SUMMARY.counts, discarded: {} } }, 1, NOW));
+    expect(noDiscards.textContent).not.toContain("Descartados");
+    expect(dom(summaryHtml(SUMMARY, 1, NOW)).querySelector("details")?.open).toBe(false);
+    expect(dom(summaryHtml(SUMMARY, 1, NOW, true)).querySelector("details")?.open).toBe(true);
   });
 
   it("round-trips the filter sheet through readFilters", () => {
