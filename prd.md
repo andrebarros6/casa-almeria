@@ -22,6 +22,14 @@ Find and sign a suitable long-term rental faster and with less daily effort, and
 - **Telegram digest** of new matches and price drops, plus an alert when a source fails 2 days in a row.
 - **Private access:** magic-link login for 2 whitelisted emails only.
 
+### Must (v1.1, agreed 2026-11-26)
+- **"A procurar" line** at the top of the page: the fixed search criteria in plain words, plus an ⓘ showing how many listings each rule discarded on the latest run. The scraper saves the criteria and counts to Supabase, so the page always matches what was actually searched.
+- **Chip row:** always-visible one-tap filters (≤900 €, 3+ quartos, mobilado, terraço, garagem, animais, ar cond., Almería / Poniente / Levante). The "Filtros" sheet keeps the rest.
+- **Stronger dedupe:** same bedrooms, price ±3% and m² ±5%, plus *either* pins within 150 m *or* descriptions ≥90% identical. Portals geocode the same flat up to km apart, and agencies reuse template text for different flats. Whole cards merge, ❤️/notes move to the surviving card, and the map uses the median pin of a card's listings.
+
+### Could (later)
+- "Ask Claude" box (sentence → filters, on Claude Sonnet 5.5, via a logged-in-only Supabase Edge Function), with daily Claude tagging of richer features (sea view, natural light, quiet…).
+
 ### Should (later)
 - Visit tracking (contacted → visit booked → visited → applied).
 - Price per m² compared with the area average.
