@@ -39,14 +39,14 @@ Fotocasa needs a real Chrome window, so it runs on this PC rather than GitHub.
 ```powershell
 .venv\Scripts\pip install -e ".[local]"
 ```
-Register the daily task once (runs at 09:00 plus a random 0–20 min; skipped if the PC is off):
+Register the daily task once (runs at 16:00 plus a random 0–20 min, close to when the cloud digest tends to land):
 ```powershell
 $action  = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"E:\projects\almeria\local\run_local.ps1`""
-$trigger = New-ScheduledTaskTrigger -Daily -At 09:00
+$trigger = New-ScheduledTaskTrigger -Daily -At 16:00
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 Register-ScheduledTask -TaskName "Almeria rental finder" -Action $action -Trigger $trigger -Settings $settings
 ```
-`-StartWhenAvailable` means that if the PC was off at 09:00, the task runs as soon as it's back on. Logs go to `local\logs\`. A Chrome window opens for a few minutes while it runs; leave it alone.
+`-StartWhenAvailable` means that if the PC was off at 16:00, the task runs as soon as it's back on. Logs go to `local\logs\`. A Chrome window opens for a few minutes while it runs; leave it alone.
 
 ## Alert emails (Idealista, yaencontre, Milanuncios)
 These portals block automated browsing, so we read their saved-search alert emails instead.
