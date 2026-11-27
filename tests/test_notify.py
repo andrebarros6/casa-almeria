@@ -206,6 +206,57 @@ def test_notify_sends_and_survives_telegram_errors(
     with caplog.at_level(logging.WARNING):
         assert notify([outcome(new_matches=[make_listing()])], JsonStore(), _telegram(broken)) == 0
     assert "TOKEN" not in caplog.text  # the token must never reach the logs
+    assert "sendMessage 401" in caplog.text  # ...but the status is there to debug with
+
+
+def test_telegram_reason_is_logged_and_bad_photo_falls_back_to_text(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        calls.append(method)
+        if method == "sendPhoto":
+            return httpx.Response(400, json={"ok": False, "description": "wrong file identifier"})
+        return httpx.Response(200, json={"ok": True})
+
+    tg = Telegram("TOKEN", "-100", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    with caplog.at_level(logging.WARNING):
+        sent = tg.send(Digest(new=[make_listing(photos=["https://img/x.jpg"])]))
+    assert sent == 2
+    assert calls == ["sendMessage", "sendPhoto", "sendMessage"]
+    assert "sendPhoto 400 wrong file identifier" in caplog.text
+    assert "TOKEN" not in caplog.text
+
+
+def test_one_failed_flat_does_not_stop_the_rest(caplog: pytest.LogCaptureFixture) -> None:
+    n = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal n
+        n += 1
+        if n == 2:  # first flat: photo fails, then its text fallback fails too
+            return httpx.Response(400, json={"description": "no"})
+        if n == 3:
+            return httpx.Response(500, text="not json")
+        return httpx.Response(200, json={"ok": True})
+
+    tg = Telegram("TOKEN", "-100", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    new = [make_listing(source_id=str(i), photos=["https://img/x.jpg"]) for i in range(2)]
+    with caplog.at_level(logging.WARNING):
+        assert tg.send(Digest(new=new)) == 2  # summary + the second flat
+    assert "Telegram message skipped: sendMessage 500" in caplog.text
+
+
+def test_from_env_strips_stray_newlines(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "abc\r\n")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", " -100\r\n")
+    tg = Telegram.from_env()
+    assert tg is not None
+    assert tg.base.endswith("/botabc") and tg.chat_id == "-100"
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "\r\n")
+    assert Telegram.from_env() is None
 
 
 # --- lead nudges ----------------------------------------------------------

@@ -219,40 +219,70 @@ class Telegram:
     def __init__(self, token: str, chat_id: str, client: httpx.Client | None = None) -> None:
         self.base = f"https://api.telegram.org/bot{token}"
         self.chat_id = chat_id
-        self.client = client or httpx.Client(timeout=20)
+        # Telegram downloads each photo from the portal itself, which can take a while.
+        self.client = client or httpx.Client(timeout=60)
 
     @classmethod
     def from_env(cls) -> Telegram | None:
-        token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+        # Strip: a secret pasted with a trailing newline would otherwise break the URL/chat id.
+        token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+        chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
         return cls(token, chat) if token and chat else None
 
     def _post(self, method: str, payload: dict[str, object]) -> None:
         resp = self.client.post(f"{self.base}/{method}", json={"chat_id": self.chat_id, **payload})
-        resp.raise_for_status()
+        if resp.is_error:
+            raise TelegramError(method, resp)
+
+    def _text(self, text: str) -> None:
+        self._post(
+            "sendMessage", {"text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+        )
 
     def send(self, digest: Digest) -> int:
-        """Send the digest; returns how many messages went out."""
+        """Send the digest; returns how many messages went out.
+
+        The summary must go through (a failure there means the bot/chat is broken, so stop).
+        Each flat is best effort: a photo Telegram can't fetch falls back to text.
+        """
         sent = 0
         summary = digest.summary()
         if summary:
-            self._post(
-                "sendMessage",
-                {"text": summary, "parse_mode": "HTML", "disable_web_page_preview": True},
-            )
+            self._text(summary)
             sent += 1
         for listing in digest.new[:MAX_PHOTO_MESSAGES]:
             text = caption(listing)
-            if listing.photos:
-                self._post(
-                    "sendPhoto", {"photo": listing.photos[0], "caption": text, "parse_mode": "HTML"}
-                )
-            else:
-                self._post(
-                    "sendMessage",
-                    {"text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
-                )
-            sent += 1
+            try:
+                if listing.photos:
+                    try:
+                        self._post(
+                            "sendPhoto",
+                            {"photo": listing.photos[0], "caption": text, "parse_mode": "HTML"},
+                        )
+                    except TelegramError as exc:
+                        log.warning("photo not sent, sending text instead: %s", exc)
+                        self._text(text)
+                else:
+                    self._text(text)
+                sent += 1
+            except (TelegramError, httpx.HTTPError) as exc:
+                log.warning("Telegram message skipped: %s", _describe(exc))
         return sent
+
+
+class TelegramError(Exception):
+    """Telegram said no. Carries its status and reason, never the URL (it holds the token)."""
+
+    def __init__(self, method: str, resp: httpx.Response) -> None:
+        try:
+            reason = str(resp.json().get("description", ""))
+        except ValueError:
+            reason = ""
+        super().__init__(f"{method} {resp.status_code} {reason}".strip())
+
+
+def _describe(exc: Exception) -> str:
+    return str(exc) if isinstance(exc, TelegramError) else type(exc).__name__
 
 
 def notify(
@@ -274,7 +304,7 @@ def notify(
         return 0
     try:
         return telegram.send(digest)
-    except httpx.HTTPError as exc:
+    except (TelegramError, httpx.HTTPError) as exc:
         # Never leak the bot token (it's in the URL) into logs.
-        log.warning("Telegram send failed: %s", type(exc).__name__)
+        log.warning("Telegram send failed: %s", _describe(exc))
         return 0
